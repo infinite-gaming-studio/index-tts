@@ -153,8 +153,13 @@ class TTSApp:
         if self.tts is None:
             raise RuntimeError("模型未加载，无法设置WebUI")
         
+        # 创建输出目录
+        output_dir = os.path.join(self.config.repo_dir, "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+        
         def ui_tts(text, audio, alpha):
-            out = "/tmp/ui_out.wav"
+            import time
+            out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
             self.tts.infer(
                 spk_audio_prompt=audio,
                 text=text,
