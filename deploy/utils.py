@@ -44,6 +44,110 @@ class EnvDetector:
             return False
 
 
+class MambaInstaller:
+    """独立安装mamba (不依赖conda)"""
+    
+    @staticmethod
+    def check_mamba() -> bool:
+        """检查mamba是否可用且是包管理器（不是测试框架）"""
+        try:
+            result = subprocess.run(["mamba", "--version"], capture_output=True, text=True)
+            if result.returncode != 0:
+                return False
+            output = result.stdout.lower() + result.stderr.lower()
+            return 'mamba' in output and 'coverage' not in output and 'test' not in output
+        except:
+            return False
+    
+    @classmethod
+    def install_micromamba(cls, work_dir: str = "/tmp") -> bool:
+        """安装micromamba (独立的轻量级mamba)"""
+        print("🔧 安装 micromamba (独立mamba)...")
+        mamba_root = f"{work_dir}/mamba"
+        
+        try:
+            # 下载安装脚本
+            import urllib.request
+            installer_url = "https://micro.mamba.pm/install.sh"
+            install_script = f"{work_dir}/micromamba_install.sh"
+            urllib.request.urlretrieve(installer_url, install_script)
+            os.chmod(install_script, 0o755)
+            
+            # 执行安装
+            env = os.environ.copy()
+            env['MAMBA_ROOT_PREFIX'] = mamba_root
+            
+            result = subprocess.run(['bash', install_script], env=env, capture_output=True, text=True)
+            if result.returncode == 0:
+                # 添加到PATH
+                bin_path = f"{mamba_root}/bin"
+                os.environ['PATH'] = f"{bin_path}:{os.environ['PATH']}"
+                
+                # 创建mamba别名指向micromamba
+                micromamba_bin = f"{bin_path}/micromamba"
+                mamba_bin = f"{bin_path}/mamba"
+                if os.path.exists(micromamba_bin) and not os.path.exists(mamba_bin):
+                    os.symlink(micromamba_bin, mamba_bin)
+                
+                print(f"✅ micromamba 安装完成 (路径: {bin_path})")
+                return True
+            else:
+                print(f"⚠️ micromamba安装失败")
+                return False
+        except Exception as e:
+            print(f"⚠️ micromamba安装异常: {e}")
+            return False
+    
+    @classmethod
+    def install_via_conda(cls) -> bool:
+        """通过conda安装mamba"""
+        try:
+            result = subprocess.run(["conda", "--version"], capture_output=True, text=True)
+            if result.returncode != 0:
+                return False
+            
+            print("🔧 通过conda安装mamba...")
+            subprocess.run(["conda", "install", "-y", "-c", "conda-forge", "mamba"], check=True)
+            return cls.check_mamba()
+        except:
+            return False
+    
+    @classmethod
+    def install(cls, work_dir: str = "/tmp") -> bool:
+        """安装mamba (优先micromamba)"""
+        if cls.check_mamba():
+            print("✅ mamba已可用")
+            return True
+        
+        # 方法1: micromamba (独立，不依赖conda)
+        if cls.install_micromamba(work_dir):
+            return True
+        
+        # 方法2: 通过conda安装
+        if cls.install_via_conda():
+            return True
+        
+        print("⚠️ 无法安装mamba，将使用pip")
+        return False
+    
+    @classmethod
+    def install_packages(cls, packages: list, channels: list = None) -> bool:
+        """使用mamba安装包"""
+        if not cls.check_mamba():
+            return False
+        
+        try:
+            cmd = ["mamba", "install", "-y"]
+            if channels:
+                for ch in channels:
+                    cmd.extend(["-c", ch])
+            cmd.extend(packages)
+            subprocess.run(cmd, check=True)
+            return True
+        except:
+            return False
+
+
 class DependencyInstaller:
     """依赖安装器 - 支持mamba加速"""
     
@@ -199,21 +303,13 @@ class DependencyInstaller:
     
     @classmethod
     def install_deps(cls, use_mamba: bool = True, in_colab: bool = False, in_kaggle: bool = False):
-        """安装核心依赖
+        """安装核心依赖 (python/cuda 已在Cell 1用mamba安装)
         
         Args:
-            use_mamba: 是否尝试使用mamba加速
+            use_mamba: Cell 1是否成功安装了mamba（仅用于显示信息）
             in_colab: 是否在Colab环境
             in_kaggle: 是否在Kaggle环境
         """
-        # 尝试使用mamba
-        if use_mamba:
-            mamba_success = cls.install_with_mamba(in_colab=in_colab, in_kaggle=in_kaggle)
-            if mamba_success:
-                print("🚀 使用mamba加速安装完成")
-            else:
-                print("⚠️ 回退到标准pip安装")
-        
         # 安装PyTorch
         cls.install_pytorch()
         
