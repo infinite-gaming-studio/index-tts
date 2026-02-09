@@ -185,6 +185,7 @@ class TTSApp:
 
         def ui_tts(text, audio, alpha):
             import time
+            import base64
             out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
             self.tts.infer(
                 spk_audio_prompt=audio,
@@ -193,11 +194,24 @@ class TTSApp:
                 emo_alpha=alpha,
                 verbose=False
             )
-            # 读取音频文件返回 (sample_rate, data) 元组，这是最可靠的方式
-            import torchaudio
-            waveform, sample_rate = torchaudio.load(out)
-            return (sample_rate, waveform.numpy().T)
-        
+            # 读取音频并转为 base64 HTML，绕过 Gradio 文件服务
+            with open(out, 'rb') as f:
+                audio_bytes = f.read()
+            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+            # 创建带 controls 的音频 HTML，同时提供下载链接
+            html = f'''<div style="padding:10px;border:1px solid #ddd;border-radius:5px;">
+                <audio controls style="width:100%;margin-bottom:10px;">
+                    <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
+                </audio>
+                <div style="text-align:center;">
+                    <a href="data:audio/wav;base64,{audio_b64}" download="{os.path.basename(out)}" 
+                       style="padding:8px 16px;background:#007bff;color:white;text-decoration:none;border-radius:4px;display:inline-block;">
+                        下载音频
+                    </a>
+                </div>
+            </div>'''
+            return html
+
         with gr.Blocks(title="IndexTTS2") as demo:
             gr.Markdown("# 🎙️ IndexTTS2")
             with gr.Row():
@@ -207,7 +221,7 @@ class TTSApp:
                     alpha = gr.Slider(0, 2, value=1, label="情感强度")
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
-                    out = gr.Audio(label="结果")
+                    out = gr.HTML(label="结果音频")  # 使用 HTML 组件显示音频
             btn.click(ui_tts, [txt, aud, alpha], out)
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
