@@ -178,14 +178,17 @@ class TTSApp:
         """配置WebUI"""
         if self.tts is None:
             raise RuntimeError("模型未加载，无法设置WebUI")
-        
-        # 创建输出目录
-        output_dir = os.path.join(self.config.repo_dir, "outputs")
-        os.makedirs(output_dir, exist_ok=True)
-        
+
+        # 使用Gradio的临时目录作为输出目录，确保文件可以通过/gradio_api/file=访问
+        import tempfile
+        gradio_temp_dir = os.path.join(tempfile.gettempdir(), "gradio")
+        os.makedirs(gradio_temp_dir, exist_ok=True)
+
         def ui_tts(text, audio, alpha):
             import time
-            out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
+            # 生成唯一文件名
+            filename = f"ui_out_{int(time.time())}.wav"
+            out = os.path.join(gradio_temp_dir, filename)
             self.tts.infer(
                 spk_audio_prompt=audio,
                 text=text,
@@ -193,6 +196,7 @@ class TTSApp:
                 emo_alpha=alpha,
                 verbose=False
             )
+            # 返回Gradio格式的文件路径
             return out
         
         with gr.Blocks(title="IndexTTS2") as demo:
