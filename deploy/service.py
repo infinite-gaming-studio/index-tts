@@ -175,7 +175,7 @@ class TTSApp:
             """)
     
     def setup_webui(self):
-        """配置WebUI"""
+        """配置WebUI - 使用Gradio临时目录确保文件可访问"""
         if self.tts is None:
             raise RuntimeError("模型未加载，无法设置WebUI")
 
@@ -185,8 +185,6 @@ class TTSApp:
 
         def ui_tts(text, audio, alpha):
             import time
-            import numpy as np
-            import torchaudio
             out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
             self.tts.infer(
                 spk_audio_prompt=audio,
@@ -195,24 +193,18 @@ class TTSApp:
                 emo_alpha=alpha,
                 verbose=False
             )
-            # 读取为 numpy 数组，Gradio Audio(type="numpy") 最稳定
-            waveform, sample_rate = torchaudio.load(out)
-            # 转为 (samples, channels) 格式，float32
-            audio_array = waveform.numpy().T.astype(np.float32)
-            if audio_array.shape[1] == 1:
-                audio_array = audio_array.squeeze(1)  # 单声道
-            return (sample_rate, audio_array)
+            return out
 
         with gr.Blocks(title="IndexTTS2") as demo:
             gr.Markdown("# 🎙️ IndexTTS2")
             with gr.Row():
                 with gr.Column():
-                    txt = gr.Textbox(label="文本")
+                    txt = gr.Textbox(label="文本", lines=4)
                     aud = gr.Audio(label="参考音频", type="filepath")
-                    alpha = gr.Slider(0, 2, value=1, label="情感强度")
+                    alpha = gr.Slider(0, 2, value=1, step=0.1, label="情感强度")
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
-                    out = gr.Audio(label="结果", type="numpy")  # numpy 模式最稳定
+                    out = gr.Audio(label="结果音频")
             btn.click(ui_tts, [txt, aud, alpha], out)
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
