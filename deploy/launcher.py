@@ -46,15 +46,42 @@ class ServiceLauncher:
         time.sleep(1)
     
     def start(self, port: int = 8000, mode: str = "both", ngrok_token: str = None):
-        """启动服务"""
+        """启动服务 - 模型检查 + 启动"""
         
         self.stop_existing()
-        
-        print(f"🚀 启动服务 (端口: {port}, 模式: {mode})...")
         
         # 准备服务脚本路径
         service_script = Path(__file__).parent / "service.py"
         repo_dir = self.config.get("repo_dir", "/tmp/index-tts")
+        
+        # 检查模型是否存在
+        checkpoint_dir = os.path.join(repo_dir, "checkpoints")
+        config_file = os.path.join(checkpoint_dir, "config.yaml")
+        
+        if not os.path.exists(config_file):
+            print(f"❌ 错误: 检查点目录不存在或没有配置文件")
+            print(f"   期望路径: {checkpoint_dir}")
+            print(f"   请先运行 Cell 2 下载模型")
+            return None
+        
+        # 检查是否有模型文件
+        has_model = False
+        if os.path.exists(checkpoint_dir):
+            files = os.listdir(checkpoint_dir)
+            # 查找模型文件 (通常是.pt, .bin, .safetensors等)
+            for f in files:
+                if f.endswith(('.pt', '.bin', '.pth', '.safetensors')):
+                    has_model = True
+                    break
+        
+        if not has_model:
+            print(f"❌ 错误: 检查点目录中没有模型文件")
+            print(f"   路径: {checkpoint_dir}")
+            print(f"   文件: {os.listdir(checkpoint_dir)}")
+            print(f"\n请先运行 Cell 2 下载模型")
+            return None
+        
+        print(f"🚀 启动服务 (端口: {port}, 模式: {mode})...")
         
         # 打开日志文件
         log_path = os.path.join(repo_dir, "service.log")
@@ -69,30 +96,61 @@ class ServiceLauncher:
             "--repo-dir", repo_dir
         ]
         
-        # 使用subprocess启动，脱离Jupyter控制
-        self.process = subprocess.Popen(
+        # 使用subprocess启动，保存stderr以便调试
+        process = subprocess.Popen(
             cmd,
             stdout=self.log_file,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             start_new_session=True,
             cwd=repo_dir
         )
+        
+        self.process = process
         
         # 保存PID
         with open("/tmp/indextts_service.pid", "w") as f:
             f.write(str(self.process.pid))
         
         print(f"  服务PID: {self.process.pid}")
+        print(f"  日志: {log_path}")
+        
+        # 立即检查进程是否存活
+        time.sleep(2)
+        if self.process.poll() is not None:
+            print("\n❌ 服务启动失败，进程立即退出")
+            # 读取并显示错误信息
+            if process.stderr:
+                stderr_output = process.stderr.read().decode('utf-8', errors='ignore')
+                if stderr_output:
+                    print("\n错误信息:")
+                    print(stderr_output)
+            
+            # 也读取日志文件
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    log_content = f.read()
+                    if log_content:
+                        print("\n日志内容:")
+                        print(log_content)
+            
+            return None
         
         # 等待服务启动
-        print("⏳ 等待服务启动 (约30秒)...")
+        print("⏳ 等待服务完全启动 (约30秒)...")
         time.sleep(30)
         
         # 检查是否启动成功
         if self.process.poll() is not None:
+            print("\n❌ 服务启动后崩溃")
             self.log_file.flush()
-            with open(log_path) as f:
-                print(f.read())
+            
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    log_content = f.read()
+                    if log_content:
+                        print("\n日志内容:")
+                        print(log_content)
+            
             raise RuntimeError("服务启动失败")
         
         print("✅ 服务启动成功")
