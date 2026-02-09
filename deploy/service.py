@@ -175,17 +175,14 @@ class TTSApp:
             """)
     
     def setup_webui(self):
-        """配置WebUI - 使用Gradio临时目录确保文件可访问"""
+        """配置WebUI - 使用HTML iframe内嵌base64音频，绕过Gradio文件服务"""
         if self.tts is None:
             raise RuntimeError("模型未加载，无法设置WebUI")
 
-        # 创建输出目录
-        output_dir = os.path.join(self.config.repo_dir, "outputs")
-        os.makedirs(output_dir, exist_ok=True)
-
         def ui_tts(text, audio, alpha):
             import time
-            out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
+            import base64
+            out = "/tmp/tts_output.wav"
             self.tts.infer(
                 spk_audio_prompt=audio,
                 text=text,
@@ -193,7 +190,13 @@ class TTSApp:
                 emo_alpha=alpha,
                 verbose=False
             )
-            return out
+            # 读取并转为base64
+            with open(out, 'rb') as f:
+                audio_bytes = f.read()
+            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+            # 使用iframe内嵌音频播放器
+            html = f'<iframe src="data:audio/wav;base64,{audio_b64}" width="100%" height="80" style="border:none;"></iframe>'
+            return html
 
         with gr.Blocks(title="IndexTTS2") as demo:
             gr.Markdown("# 🎙️ IndexTTS2")
@@ -204,7 +207,7 @@ class TTSApp:
                     alpha = gr.Slider(0, 2, value=1, step=0.1, label="情感强度")
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
-                    out = gr.Audio(label="结果音频")
+                    out = gr.HTML(label="结果音频")
             btn.click(ui_tts, [txt, aud, alpha], out)
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
