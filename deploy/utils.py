@@ -161,7 +161,7 @@ class DependencyInstaller:
     PIP_DEPS = [
         "torch==2.8.0",
         "torchaudio==2.8.0",
-        "--index-url", "https://download.pytorch.org/whl/cu121",
+        "--index-url", "https://download.pytorch.org/whl/cu128",
     ]
     
     CORE_DEPS = [
@@ -295,11 +295,29 @@ class DependencyInstaller:
     
     @classmethod
     def install_pytorch(cls):
-        """安装PyTorch"""
-        print("📦 安装PyTorch...")
-        cmd = ["pip", "install", "-q"] + cls.PIP_DEPS
-        subprocess.run(cmd, check=True)
-        print("✅ PyTorch安装完成")
+        """安装PyTorch (带fallback)"""
+        print("📦 安装PyTorch (尝试cu128)...")
+        try:
+            # 首先尝试项目要求的cu128
+            cmd = ["pip", "install", "-q"] + cls.PIP_DEPS
+            subprocess.run(cmd, check=True)
+            print("✅ PyTorch cu128 安装完成")
+        except subprocess.CalledProcessError:
+            print("⚠️ cu128不可用，尝试cu121...")
+            try:
+                # 回退到cu121
+                fallback_cmd = [
+                    "pip", "install", "-q",
+                    "torch==2.5.1", "torchaudio==2.5.1",
+                    "--index-url", "https://download.pytorch.org/whl/cu121"
+                ]
+                subprocess.run(fallback_cmd, check=True)
+                print("✅ PyTorch cu121 (2.5.1) 安装完成")
+            except subprocess.CalledProcessError:
+                print("⚠️ CUDA版本均不可用，使用标准pip...")
+                # 最后回退到标准pip
+                subprocess.run(["pip", "install", "-q", "torch", "torchaudio"], check=True)
+                print("✅ PyTorch (标准版) 安装完成")
     
     @classmethod
     def install_deps(cls, use_mamba: bool = True, in_colab: bool = False, in_kaggle: bool = False):
