@@ -62,7 +62,16 @@ class TTSApp:
     
     def load_model(self):
         """加载模型"""
-        print("🔄 加载模型...")
+        import time
+        start_time = time.time()
+        
+        print("="*60)
+        print("🔄 开始加载模型...")
+        print(f"   配置文件: {self.config.cfg_path}")
+        print(f"   模型目录: {self.config.model_dir}")
+        print(f"   设备: {self.config.device}")
+        print(f"   FP16: {self.config.use_fp16}")
+        print("="*60, flush=True)
         
         if not os.path.exists(self.config.cfg_path):
             raise FileNotFoundError(f"找不到配置文件: {self.config.cfg_path}")
@@ -73,7 +82,13 @@ class TTSApp:
             use_fp16=self.config.use_fp16,
             device=self.config.device
         )
-        print(f"✅ 模型加载完成 (设备: {self.config.device})")
+        
+        elapsed = time.time() - start_time
+        print("="*60)
+        print(f"✅ 模型加载完成!")
+        print(f"   耗时: {elapsed:.1f}秒")
+        print(f"   设备: {self.config.device}")
+        print("="*60, flush=True)
     
     def _setup_routes(self):
         """设置路由"""
@@ -165,7 +180,12 @@ class TTSApp:
     
     def run(self):
         """运行服务"""
-        print(f"🚀 启动服务: http://0.0.0.0:{self.config.port}")
+        print("\n" + "="*60)
+        print("🚀 启动服务...")
+        print(f"   地址: http://0.0.0.0:{self.config.port}")
+        print(f"   API文档: http://localhost:{self.config.port}/docs")
+        print(f"   WebUI: http://localhost:{self.config.port}/ui")
+        print("="*60 + "\n", flush=True)
         uvicorn.run(self.app, host="0.0.0.0", port=self.config.port)
 
 
@@ -175,30 +195,41 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="服务端口")
     parser.add_argument("--mode", choices=["api", "webui", "both"], default="both",
                        help="部署模式: api仅API, webui仅WebUI, both两者")
-    parser.add_argument("--repo-dir", type=str, default=None, 
+    parser.add_argument("--repo-dir", type=str, default=None,
                        help="项目根目录路径")
     parser.add_argument("--no-fp16", action="store_true",
                        help="禁用FP16")
-    
+
     args = parser.parse_args()
-    
+
     # 环境变量覆盖
     if args.repo_dir:
         os.environ["INDEXTTS_REPO_DIR"] = args.repo_dir
-    
+
+    print("\n" + "="*60)
+    print("🎙️ IndexTTS2 部署服务")
+    print("="*60)
+
     # 创建配置
     config = TTSConfig()
     config.port = args.port
     config.mode = args.mode
     config.use_fp16 = not args.no_fp16
-    
+
+    print(f"   模式: {config.mode}")
+    print(f"   端口: {config.port}")
+    print(f"   项目路径: {config.repo_dir}")
+    print("="*60 + "\n", flush=True)
+
     # 启动服务
     app = TTSApp(config)
     app.load_model()
-    
+
     if config.mode in ["webui", "both"]:
+        print("\n🎨 设置WebUI...", flush=True)
         app.setup_webui()
-    
+        print("✅ WebUI设置完成\n", flush=True)
+
     app.run()
 
 
