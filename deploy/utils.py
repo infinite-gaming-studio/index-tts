@@ -89,9 +89,16 @@ class DependencyInstaller:
     
     @classmethod
     def _check_mamba(cls) -> bool:
-        """检查mamba是否可用"""
+        """检查mamba是否可用（且是conda包管理器，不是测试框架）"""
         try:
-            subprocess.run(["mamba", "--version"], capture_output=True, check=True)
+            result = subprocess.run(["mamba", "--version"], capture_output=True, text=True)
+            if result.returncode != 0:
+                return False
+            # 检查是否是conda的mamba（不是Python测试框架mamba）
+            # conda mamba会显示版本号，测试框架会显示帮助信息包含"coverage"
+            output = result.stdout.lower() + result.stderr.lower()
+            if 'coverage' in output or 'test' in output:
+                return False
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
@@ -116,41 +123,71 @@ class DependencyInstaller:
     
     @classmethod
     def setup_mamba_kaggle(cls):
-        """在Kaggle安装mamba"""
-        print("🔧 Kaggle环境: 安装mamba...")
-        # Kaggle通常有conda，安装mamba
-        subprocess.run([
-            "conda", "install", "-y", "-c", "conda-forge", "mamba"
-        ], check=True)
-        print("✅ mamba安装完成")
+        """在Kaggle安装mamba（如果可用）"""
+        print("🔧 Kaggle环境: 检查mamba...")
+        # Kaggle的mamba可能是测试框架，先检查
+        if cls._check_mamba():
+            print("✅ mamba已可用")
+            return True
+        # 尝试安装conda的mamba
+        try:
+            subprocess.run([
+                "conda", "install", "-y", "-c", "conda-forge", "mamba"
+            ], check=True)
+            # 再次检查
+            if cls._check_mamba():
+                print("✅ mamba安装完成")
+                return True
+            else:
+                print("⚠️ 安装的mamba不是包管理器，使用conda")
+                return False
+        except Exception as e:
+            print(f"⚠️ mamba安装失败: {e}，使用conda")
+            return False
+    
+    @classmethod
+    def install_with_conda(cls) -> bool:
+        """使用conda安装依赖"""
+        if not cls._check_conda():
+            return False
+        print("🚀 使用conda安装基础依赖...")
+        try:
+            cmd = ["conda", "install", "-y", "-c", "conda-forge", "-c", "nvidia"] + cls.MAMBA_DEPS
+            subprocess.run(cmd, check=True)
+            print("✅ conda依赖安装完成")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ conda安装失败: {e}")
+            return False
     
     @classmethod
     def install_with_mamba(cls, in_colab: bool = False, in_kaggle: bool = False):
-        """使用mamba安装依赖（更快）"""
+        """使用mamba安装依赖（更快），失败时回退到conda或pip"""
         
-        # 根据环境安装mamba
+        # 根据环境安装/检查mamba
         if in_colab and not cls._check_mamba():
             cls.setup_mamba_colab()
         elif in_kaggle and not cls._check_mamba():
-            if not cls._check_conda():
-                print("⚠️ Kaggle环境未检测到conda，回退到pip安装")
-                return False
+            # Kaggle使用conda安装mamba
             cls.setup_mamba_kaggle()
         
-        if not cls._check_mamba():
-            print("⚠️ mamba不可用，回退到pip安装")
-            return False
+        # 尝试使用mamba
+        if cls._check_mamba():
+            print("🚀 使用mamba安装基础依赖（更快）...")
+            try:
+                cmd = ["mamba", "install", "-y", "-c", "conda-forge", "-c", "nvidia"] + cls.MAMBA_DEPS
+                subprocess.run(cmd, check=True)
+                print("✅ mamba依赖安装完成")
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️ mamba安装失败: {e}，尝试conda")
         
-        print("🚀 使用mamba安装基础依赖（更快）...")
-        try:
-            # 使用mamba安装
-            cmd = ["mamba", "install", "-y", "-c", "conda-forge", "-c", "nvidia"] + cls.MAMBA_DEPS
-            subprocess.run(cmd, check=True)
-            print("✅ mamba依赖安装完成")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️ mamba安装失败: {e}")
-            return False
+        # 回退到conda
+        if cls._check_conda():
+            return cls.install_with_conda()
+        
+        print("⚠️ conda/mamba都不可用，回退到pip安装")
+        return False
     
     @classmethod
     def install_pytorch(cls):
