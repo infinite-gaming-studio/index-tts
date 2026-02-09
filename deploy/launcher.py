@@ -83,24 +83,21 @@ class ServiceLauncher:
         
         print(f"🚀 启动服务 (端口: {port}, 模式: {mode})...")
         
-        # 打开日志文件
-        log_path = os.path.join(repo_dir, "service.log")
-        self.log_file = open(log_path, "w")
-        
-        # 启动服务进程
+        # 启动服务进程 - 日志直接输出到控制台
         cmd = [
             sys.executable,
+            "-u",  # 无缓冲输出
             str(service_script),
             "--port", str(port),
             "--mode", mode,
             "--repo-dir", repo_dir
         ]
         
-        # 使用subprocess启动，保存stderr以便调试
+        # 使用subprocess启动，输出直接显示
         process = subprocess.Popen(
             cmd,
-            stdout=self.log_file,
-            stderr=subprocess.PIPE,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
             start_new_session=True,
             cwd=repo_dir
         )
