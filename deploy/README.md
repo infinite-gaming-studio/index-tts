@@ -1,14 +1,12 @@
 # IndexTTS2 部署工具
 
-简洁的部署方案，解决"先有鸡还是先有蛋"的导入悖论。
+简洁的部署方案，解决"先有鸡还是先有蛋"的导入悖论，支持mamba加速安装。
 
-## 核心问题
+## 核心特性
 
-**导入悖论**: Notebook 需要导入 `deploy.utils`，但代码仓库还没克隆。
-
-**解决方案**: 
-1. **Cell 1** 独立运行：环境检测 + 基础安装 + 克隆代码（不依赖deploy模块）
-2. **Cell 2+** 才能安全导入 `deploy.xxx`
+1. **导入悖论解决**: Cell 1 独立克隆代码，Cell 2+ 才能导入 deploy 模块
+2. **mamba加速**: 自动检测Colab/Kaggle环境，使用mamba加速依赖安装
+3. **环境适配**: 自动检测并适配Google Colab和Kaggle环境
 
 ## 目录结构
 
@@ -17,7 +15,7 @@ deploy/
 ├── IndexTTS2_Deploy.ipynb  # Notebook部署文件（4个Cell）
 ├── service.py              # 核心服务（FastAPI + WebUI）
 ├── launcher.py             # 服务启动器
-├── utils.py                # 工具函数
+├── utils.py                # 工具函数（含mamba支持）
 └── README.md               # 本文件
 ```
 
@@ -25,10 +23,10 @@ deploy/
 
 ### 方式1: Notebook 部署（Colab/Kaggle）
 
-**必须按顺序执行**：
+**必须按顺序执行4个Cell**：
 
+#### Cell 1: 环境准备（独立运行）
 ```python
-# Cell 1: 环境准备（独立运行，不导入deploy模块）
 import os, sys, json, subprocess
 
 # 环境检测
@@ -37,38 +35,55 @@ IN_KAGGLE = os.path.exists('/kaggle/input')
 WORK_DIR = '/content' if IN_COLAB else '/kaggle/working' if IN_KAGGLE else '/tmp'
 REPO_DIR = f"{WORK_DIR}/index-tts"
 
-# 克隆代码
+# 基础依赖 + 克隆代码
+subprocess.run(["pip", "install", "-q", "torch==2.8.0", "torchaudio==2.8.0", 
+    "--index-url", "https://download.pytorch.org/whl/cu121"], check=True)
+
 subprocess.run(["git", "clone", "-b", "dev", 
     "https://github.com/infinite-gaming-studio/index-tts.git", REPO_DIR], check=True)
 
 # 保存配置
-json.dump({"repo_dir": REPO_DIR}, open("/tmp/notebook_config.json", "w"))
+json.dump({"work_dir": WORK_DIR, "repo_dir": REPO_DIR, 
+    "in_colab": IN_COLAB, "in_kaggle": IN_KAGGLE}, 
+    open("/tmp/notebook_config.json", "w"))
+
 sys.path.insert(0, REPO_DIR)
 ```
 
+#### Cell 2: 使用mamba安装依赖
 ```python
-# Cell 2: 此时代码已存在，可以安全导入deploy
+# 读取环境配置
+config = json.load(open("/tmp/notebook_config.json"))
+IN_COLAB = config.get("in_colab", False)
+IN_KAGGLE = config.get("in_kaggle", False)
+
+# 现在可以安全导入deploy模块
 from deploy.utils import DependencyInstaller, ModelDownloader, check_model_exists
 
-# 安装依赖
-DependencyInstaller.install_deps()
+# 使用mamba加速安装（自动适配Colab/Kaggle）
+DependencyInstaller.install_deps(
+    use_mamba=True,
+    in_colab=IN_COLAB,
+    in_kaggle=IN_KAGGLE
+)
+
+# 安装项目
 subprocess.run(["pip", "install", "-q", "-e", REPO_DIR], check=True)
 
 # 下载模型
-if not check_model_exists(f"{REPO_DIR}/checkpoints"):
-    ModelDownloader.download(f"{REPO_DIR}/checkpoints")
+CHECKPOINT_DIR = f"{REPO_DIR}/checkpoints"
+if not check_model_exists(CHECKPOINT_DIR):
+    ModelDownloader.download(CHECKPOINT_DIR)
 ```
 
+#### Cell 3-4: 启动和管理服务
 ```python
 # Cell 3: 启动服务
 from deploy.launcher import quick_start
 launcher = quick_start(port=8000, mode="both", ngrok_token=None)
-```
 
-```python
 # Cell 4: 管理（可选）
 launcher.logs(30)   # 查看日志
-launcher.status()   # 检查状态
 launcher.stop()     # 停止服务
 ```
 

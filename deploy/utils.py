@@ -45,7 +45,20 @@ class EnvDetector:
 
 
 class DependencyInstaller:
-    """依赖安装器"""
+    """依赖安装器 - 支持mamba加速"""
+    
+    # 可用mamba安装的包（更快）
+    MAMBA_DEPS = [
+        "python=3.10",
+        "cudatoolkit=11.8",
+    ]
+    
+    # 必须用pip安装的包
+    PIP_DEPS = [
+        "torch==2.8.0",
+        "torchaudio==2.8.0",
+        "--index-url", "https://download.pytorch.org/whl/cu121",
+    ]
     
     CORE_DEPS = [
         "accelerate==1.8.1",
@@ -75,29 +88,103 @@ class DependencyInstaller:
     ]
     
     @classmethod
-    def install_pytorch(cls):
-        """安装PyTorch"""
-        cmd = [
-            "pip", "install", "-q",
-            "torch==2.8.0", "torchaudio==2.8.0",
-            "--index-url", "https://download.pytorch.org/whl/cu121"
-        ]
-        subprocess.run(cmd, check=True)
+    def _check_mamba(cls) -> bool:
+        """检查mamba是否可用"""
+        try:
+            subprocess.run(["mamba", "--version"], capture_output=True, check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
     
     @classmethod
-    def install_deps(cls):
-        """安装核心依赖"""
-        for dep in cls.CORE_DEPS:
-            subprocess.run(["pip", "install", "-q", dep], check=True)
+    def _check_conda(cls) -> bool:
+        """检查conda是否可用"""
+        try:
+            subprocess.run(["conda", "--version"], capture_output=True, check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
     
     @classmethod
-    def install_conda_colab(cls):
-        """在Colab安装conda"""
-        subprocess.run([
-            "pip", "install", "-q", "condacolab"
-        ], check=True)
+    def setup_mamba_colab(cls):
+        """在Colab安装mamba (通过condacolab)"""
+        print("🔧 Colab环境: 安装condacolab...")
+        subprocess.run(["pip", "install", "-q", "condacolab"], check=True)
         import condacolab
         condacolab.install()
+        print("✅ condacolab安装完成")
+    
+    @classmethod
+    def setup_mamba_kaggle(cls):
+        """在Kaggle安装mamba"""
+        print("🔧 Kaggle环境: 安装mamba...")
+        # Kaggle通常有conda，安装mamba
+        subprocess.run([
+            "conda", "install", "-y", "-c", "conda-forge", "mamba"
+        ], check=True)
+        print("✅ mamba安装完成")
+    
+    @classmethod
+    def install_with_mamba(cls, in_colab: bool = False, in_kaggle: bool = False):
+        """使用mamba安装依赖（更快）"""
+        
+        # 根据环境安装mamba
+        if in_colab and not cls._check_mamba():
+            cls.setup_mamba_colab()
+        elif in_kaggle and not cls._check_mamba():
+            if not cls._check_conda():
+                print("⚠️ Kaggle环境未检测到conda，回退到pip安装")
+                return False
+            cls.setup_mamba_kaggle()
+        
+        if not cls._check_mamba():
+            print("⚠️ mamba不可用，回退到pip安装")
+            return False
+        
+        print("🚀 使用mamba安装基础依赖（更快）...")
+        try:
+            # 使用mamba安装
+            cmd = ["mamba", "install", "-y", "-c", "conda-forge", "-c", "nvidia"] + cls.MAMBA_DEPS
+            subprocess.run(cmd, check=True)
+            print("✅ mamba依赖安装完成")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ mamba安装失败: {e}")
+            return False
+    
+    @classmethod
+    def install_pytorch(cls):
+        """安装PyTorch"""
+        print("📦 安装PyTorch...")
+        cmd = ["pip", "install", "-q"] + cls.PIP_DEPS
+        subprocess.run(cmd, check=True)
+        print("✅ PyTorch安装完成")
+    
+    @classmethod
+    def install_deps(cls, use_mamba: bool = True, in_colab: bool = False, in_kaggle: bool = False):
+        """安装核心依赖
+        
+        Args:
+            use_mamba: 是否尝试使用mamba加速
+            in_colab: 是否在Colab环境
+            in_kaggle: 是否在Kaggle环境
+        """
+        # 尝试使用mamba
+        if use_mamba:
+            mamba_success = cls.install_with_mamba(in_colab=in_colab, in_kaggle=in_kaggle)
+            if mamba_success:
+                print("🚀 使用mamba加速安装完成")
+            else:
+                print("⚠️ 回退到标准pip安装")
+        
+        # 安装PyTorch
+        cls.install_pytorch()
+        
+        # 安装其他依赖
+        print("📦 安装核心依赖...")
+        for dep in cls.CORE_DEPS:
+            subprocess.run(["pip", "install", "-q", dep], check=True)
+        print("✅ 核心依赖安装完成")
 
 
 class ModelDownloader:
