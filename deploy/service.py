@@ -1,0 +1,206 @@
+"""
+IndexTTS2 部署服务核心
+处理模型加载、API和WebUI服务
+"""
+
+import os
+import sys
+import json
+import argparse
+import torch
+from pathlib import Path
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+import uvicorn
+import shutil
+import gradio as gr
+from tempfile import NamedTemporaryFile
+
+# 添加项目路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from indextts.infer_v2 import IndexTTS2
+
+
+class TTSConfig:
+    """配置类"""
+    def __init__(self):
+        self.repo_dir = self._get_repo_dir()
+        self.cfg_path = os.path.join(self.repo_dir, "checkpoints/config.yaml")
+        self.model_dir = os.path.join(self.repo_dir, "checkpoints")
+        self.port = 8000
+        self.mode = "both"  # api | webui | both
+        self.use_fp16 = True
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    
+    def _get_repo_dir(self):
+        """获取项目根目录"""
+        # 方式1: 环境变量
+        repo_dir = os.environ.get("INDEXTTS_REPO_DIR")
+        if repo_dir:
+            return repo_dir
+        
+        # 方式2: 配置文件
+        config_file = "/tmp/notebook_config.json"
+        if os.path.exists(config_file):
+            with open(config_file) as f:
+                config = json.load(f)
+                return config.get("repo_dir", "/tmp/index-tts")
+        
+        # 方式3: 相对路径
+        return str(Path(__file__).parent.parent)
+
+
+class TTSApp:
+    """TTS应用服务"""
+    
+    def __init__(self, config: TTSConfig = None):
+        self.config = config or TTSConfig()
+        self.tts = None
+        self.app = FastAPI(title="IndexTTS2")
+        self._setup_routes()
+    
+    def load_model(self):
+        """加载模型"""
+        print("🔄 加载模型...")
+        
+        if not os.path.exists(self.config.cfg_path):
+            raise FileNotFoundError(f"找不到配置文件: {self.config.cfg_path}")
+        
+        self.tts = IndexTTS2(
+            cfg_path=self.config.cfg_path,
+            model_dir=self.config.model_dir,
+            use_fp16=self.config.use_fp16,
+            device=self.config.device
+        )
+        print(f"✅ 模型加载完成 (设备: {self.config.device})")
+    
+    def _setup_routes(self):
+        """设置路由"""
+        
+        @self.app.post("/api/tts")
+        async def tts(
+            text: str = Form(...),
+            spk_audio: UploadFile = File(...),
+            emo_alpha: float = Form(1.0)
+        ):
+            """TTS API接口"""
+            try:
+                if self.tts is None:
+                    return JSONResponse(
+                        status_code=503, 
+                        content={"error": "模型未加载"}
+                    )
+                
+                # 保存参考音频
+                with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    shutil.copyfileobj(spk_audio.file, tmp)
+                    spk_path = tmp.name
+                
+                # 生成音频
+                output = "/tmp/out.wav"
+                self.tts.infer(
+                    spk_audio_prompt=spk_path,
+                    text=text,
+                    output_path=output,
+                    emo_alpha=emo_alpha,
+                    verbose=False
+                )
+                os.unlink(spk_path)
+                
+                return FileResponse(output, media_type="audio/wav")
+            except Exception as e:
+                return JSONResponse(
+                    status_code=500, 
+                    content={"error": str(e)}
+                )
+        
+        @self.app.get("/api/health")
+        async def health():
+            """健康检查"""
+            return {
+                "status": "ok",
+                "model": "IndexTTS2",
+                "device": str(self.tts.device if self.tts else "not loaded"),
+                "loaded": self.tts is not None
+            }
+        
+        @self.app.get("/")
+        async def root():
+            """首页"""
+            return HTMLResponse(content="""
+            <h1>🎙️ IndexTTS2 服务</h1>
+            <p>API: <code>POST /api/tts</code> | WebUI: <a href="/ui">/ui</a> | Docs: <a href="/docs">/docs</a></p>
+            """)
+    
+    def setup_webui(self):
+        """配置WebUI"""
+        if self.tts is None:
+            raise RuntimeError("模型未加载，无法设置WebUI")
+        
+        def ui_tts(text, audio, alpha):
+            out = "/tmp/ui_out.wav"
+            self.tts.infer(
+                spk_audio_prompt=audio,
+                text=text,
+                output_path=out,
+                emo_alpha=alpha,
+                verbose=False
+            )
+            return out
+        
+        with gr.Blocks(title="IndexTTS2") as demo:
+            gr.Markdown("# 🎙️ IndexTTS2")
+            with gr.Row():
+                with gr.Column():
+                    txt = gr.Textbox(label="文本")
+                    aud = gr.Audio(label="参考音频", type="filepath")
+                    alpha = gr.Slider(0, 2, value=1, label="情感强度")
+                    btn = gr.Button("生成", variant="primary")
+                with gr.Column():
+                    out = gr.Audio(label="结果")
+            btn.click(ui_tts, [txt, aud, alpha], out)
+        
+        self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
+    
+    def run(self):
+        """运行服务"""
+        print(f"🚀 启动服务: http://0.0.0.0:{self.config.port}")
+        uvicorn.run(self.app, host="0.0.0.0", port=self.config.port)
+
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description="IndexTTS2 部署服务")
+    parser.add_argument("--port", type=int, default=8000, help="服务端口")
+    parser.add_argument("--mode", choices=["api", "webui", "both"], default="both",
+                       help="部署模式: api仅API, webui仅WebUI, both两者")
+    parser.add_argument("--repo-dir", type=str, default=None, 
+                       help="项目根目录路径")
+    parser.add_argument("--no-fp16", action="store_true",
+                       help="禁用FP16")
+    
+    args = parser.parse_args()
+    
+    # 环境变量覆盖
+    if args.repo_dir:
+        os.environ["INDEXTTS_REPO_DIR"] = args.repo_dir
+    
+    # 创建配置
+    config = TTSConfig()
+    config.port = args.port
+    config.mode = args.mode
+    config.use_fp16 = not args.no_fp16
+    
+    # 启动服务
+    app = TTSApp(config)
+    app.load_model()
+    
+    if config.mode in ["webui", "both"]:
+        app.setup_webui()
+    
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
