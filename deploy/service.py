@@ -185,7 +185,8 @@ class TTSApp:
 
         def ui_tts(text, audio, alpha):
             import time
-            import base64
+            import numpy as np
+            import torchaudio
             out = os.path.join(output_dir, f"ui_out_{int(time.time())}.wav")
             self.tts.infer(
                 spk_audio_prompt=audio,
@@ -194,23 +195,13 @@ class TTSApp:
                 emo_alpha=alpha,
                 verbose=False
             )
-            # 读取音频并转为 base64 HTML，绕过 Gradio 文件服务
-            with open(out, 'rb') as f:
-                audio_bytes = f.read()
-            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-            # 创建带 controls 的音频 HTML，同时提供下载链接
-            html = f'''<div style="padding:10px;border:1px solid #ddd;border-radius:5px;">
-                <audio controls style="width:100%;margin-bottom:10px;">
-                    <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
-                </audio>
-                <div style="text-align:center;">
-                    <a href="data:audio/wav;base64,{audio_b64}" download="{os.path.basename(out)}" 
-                       style="padding:8px 16px;background:#007bff;color:white;text-decoration:none;border-radius:4px;display:inline-block;">
-                        下载音频
-                    </a>
-                </div>
-            </div>'''
-            return html
+            # 读取为 numpy 数组，Gradio Audio(type="numpy") 最稳定
+            waveform, sample_rate = torchaudio.load(out)
+            # 转为 (samples, channels) 格式，float32
+            audio_array = waveform.numpy().T.astype(np.float32)
+            if audio_array.shape[1] == 1:
+                audio_array = audio_array.squeeze(1)  # 单声道
+            return (sample_rate, audio_array)
 
         with gr.Blocks(title="IndexTTS2") as demo:
             gr.Markdown("# 🎙️ IndexTTS2")
@@ -221,7 +212,7 @@ class TTSApp:
                     alpha = gr.Slider(0, 2, value=1, label="情感强度")
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
-                    out = gr.HTML(label="结果音频")  # 使用 HTML 组件显示音频
+                    out = gr.Audio(label="结果", type="numpy")  # numpy 模式最稳定
             btn.click(ui_tts, [txt, aud, alpha], out)
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
