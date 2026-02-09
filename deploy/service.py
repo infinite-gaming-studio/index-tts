@@ -9,8 +9,9 @@ import json
 import argparse
 import torch
 from pathlib import Path
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Depends, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 import shutil
 import gradio as gr
@@ -32,6 +33,7 @@ class TTSConfig:
         self.mode = "both"  # api | webui | both
         self.use_fp16 = True
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.api_token = os.environ.get("INDEXTTS_API_TOKEN")  # API鉴权token
     
     def _get_repo_dir(self):
         """获取项目根目录"""
@@ -58,6 +60,7 @@ class TTSApp:
         self.config = config or TTSConfig()
         self.tts = None
         self.app = FastAPI(title="IndexTTS2")
+        self.security = HTTPBearer(auto_error=False)
         self._setup_routes()
     
     def load_model(self):
@@ -90,6 +93,28 @@ class TTSApp:
         print(f"   设备: {self.config.device}")
         print("="*60, flush=True)
     
+    def _verify_token(self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
+        """验证API Token"""
+        # 如果没有配置token，则无需鉴权
+        if not self.config.api_token:
+            return True
+        
+        # 检查token
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if credentials.credentials != self.config.api_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return True
+
     def _setup_routes(self):
         """设置路由"""
         
@@ -97,9 +122,10 @@ class TTSApp:
         async def tts(
             text: str = Form(...),
             spk_audio: UploadFile = File(...),
-            emo_alpha: float = Form(1.0)
+            emo_alpha: float = Form(1.0),
+            authenticated: bool = Depends(self._verify_token)
         ):
-            """TTS API接口"""
+            """TTS API接口 (需要token鉴权)"""
             try:
                 if self.tts is None:
                     return JSONResponse(
@@ -132,7 +158,7 @@ class TTSApp:
         
         @self.app.get("/api/health")
         async def health():
-            """健康检查"""
+            """健康检查 (公开接口，无需鉴权)"""
             return {
                 "status": "ok",
                 "model": "IndexTTS2",

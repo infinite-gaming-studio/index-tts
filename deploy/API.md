@@ -17,6 +17,10 @@ python deploy/service.py --mode api
 
 # 仅启动WebUI服务
 python deploy/service.py --mode webui
+
+# 启用API鉴权（设置环境变量）
+export INDEXTTS_API_TOKEN="your-secret-token"
+python deploy/service.py --mode api
 ```
 
 ### 启动参数
@@ -39,6 +43,14 @@ python deploy/service.py --mode webui
 - **URL**: `/api/tts`
 - **Method**: `POST`
 - **Content-Type**: `multipart/form-data`
+
+#### 鉴权
+
+如果设置了 `INDEXTTS_API_TOKEN` 环境变量，需要在请求头中携带 Token：
+
+```
+Authorization: Bearer <your-token>
+```
 
 #### 请求参数
 
@@ -70,7 +82,7 @@ python deploy/service.py --mode webui
 
 #### 调用示例
 
-**cURL**:
+**cURL (无鉴权)**:
 ```bash
 curl -X POST "http://localhost:8000/api/tts" \
   -F "text=你好，这是语音合成测试" \
@@ -79,7 +91,17 @@ curl -X POST "http://localhost:8000/api/tts" \
   --output output.wav
 ```
 
-**Python (requests)**:
+**cURL (带鉴权)**:
+```bash
+curl -X POST "http://localhost:8000/api/tts" \
+  -H "Authorization: Bearer your-secret-token" \
+  -F "text=你好，这是语音合成测试" \
+  -F "spk_audio=@reference.wav" \
+  -F "emo_alpha=1.0" \
+  --output output.wav
+```
+
+**Python (requests - 无鉴权)**:
 ```python
 import requests
 
@@ -89,6 +111,26 @@ with open("reference.wav", "rb") as f:
     files = {"spk_audio": f}
     data = {"text": "你好，这是语音合成测试", "emo_alpha": 1.0}
     response = requests.post(url, files=files, data=data)
+
+if response.status_code == 200:
+    with open("output.wav", "wb") as f:
+        f.write(response.content)
+    print("合成成功!")
+else:
+    print(f"错误: {response.json()}")
+```
+
+**Python (requests - 带鉴权)**:
+```python
+import requests
+
+url = "http://localhost:8000/api/tts"
+headers = {"Authorization": "Bearer your-secret-token"}
+
+with open("reference.wav", "rb") as f:
+    files = {"spk_audio": f}
+    data = {"text": "你好，这是语音合成测试", "emo_alpha": 1.0}
+    response = requests.post(url, headers=headers, files=files, data=data)
 
 if response.status_code == 200:
     with open("output.wav", "wb") as f:
@@ -202,6 +244,7 @@ curl http://localhost:8000/api/health
 | 状态码 | 说明 |
 |--------|------|
 | 200 | 请求成功 |
+| 401 | 未授权（Token 无效或缺失） |
 | 500 | 服务器内部错误（如推理失败） |
 | 503 | 服务不可用（模型未加载） |
 
@@ -235,6 +278,7 @@ curl http://localhost:8000/api/health
 | 变量名 | 说明 |
 |--------|------|
 | `INDEXTTS_REPO_DIR` | 项目根目录路径 |
+| `INDEXTTS_API_TOKEN` | API 鉴权 Token（可选，设置后 `/api/tts` 需要鉴权） |
 
 ---
 
