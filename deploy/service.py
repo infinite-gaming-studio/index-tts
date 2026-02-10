@@ -194,8 +194,11 @@ class TTSApp:
             with open(out, 'rb') as f:
                 audio_bytes = f.read()
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-            # 使用iframe内嵌音频播放器
-            html = f'<iframe src="data:audio/wav;base64,{audio_b64}" width="100%" height="80" style="border:none;"></iframe>'
+            # 使用HTML5 audio标签播放base64音频
+            html = f'''<audio controls style="width:100%;" autoplay>
+  <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
+  您的浏览器不支持音频播放。
+</audio>'''
             return html
 
         with gr.Blocks(title="IndexTTS2") as demo:
@@ -207,7 +210,8 @@ class TTSApp:
                     alpha = gr.Slider(0, 2, value=1, step=0.1, label="情感强度")
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
-                    out = gr.HTML(label="结果音频")
+                    gr.Markdown("### 生成结果")
+                    out = gr.HTML()
             btn.click(ui_tts, [txt, aud, alpha], out)
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
