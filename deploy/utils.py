@@ -344,17 +344,29 @@ class ModelDownloader:
     MODEL_ID = "IndexTeam/IndexTTS-2"
     
     @classmethod
-    def download_from_hf(cls, target_dir: str) -> bool:
+    def _get_python_executable(cls, python_executable: str = None) -> str:
+        """获取Python可执行文件路径"""
+        if python_executable:
+            return python_executable
+        # 检查是否有配置的Python路径（从notebook配置）
+        config = load_config()
+        if 'python' in config and os.path.exists(config['python']):
+            return config['python']
+        return sys.executable
+    
+    @classmethod
+    def download_from_hf(cls, target_dir: str, python_executable: str = None) -> bool:
         """从HuggingFace下载"""
+        python = cls._get_python_executable(python_executable)
         try:
-            # 使用当前Python环境的pip（确保是mamba环境的）
+            # 使用指定Python环境的pip
             subprocess.run([
-                sys.executable, "-m", "pip", "install", "-q", "huggingface-hub[cli]"
+                python, "-m", "pip", "install", "-q", "huggingface-hub[cli]"
             ], check=True)
             
             # 使用 python -m 方式调用，避免PATH问题
             subprocess.run([
-                sys.executable, "-m", "huggingface_hub", "download",
+                python, "-m", "huggingface_hub", "download",
                 cls.MODEL_ID,
                 "--local-dir", target_dir,
                 "--resume-download"
@@ -365,17 +377,18 @@ class ModelDownloader:
             return False
     
     @classmethod
-    def download_from_modelscope(cls, target_dir: str) -> bool:
+    def download_from_modelscope(cls, target_dir: str, python_executable: str = None) -> bool:
         """从ModelScope下载"""
+        python = cls._get_python_executable(python_executable)
         try:
-            # 使用当前Python环境的pip
+            # 使用指定Python环境的pip
             subprocess.run([
-                sys.executable, "-m", "pip", "install", "-q", "modelscope"
+                python, "-m", "pip", "install", "-q", "modelscope"
             ], check=True)
             
             # 使用 python -m 方式调用
             subprocess.run([
-                sys.executable, "-m", "modelscope", "download",
+                python, "-m", "modelscope", "download",
                 "--model", cls.MODEL_ID,
                 "--local_dir", target_dir
             ], check=True)
@@ -385,17 +398,24 @@ class ModelDownloader:
             return False
     
     @classmethod
-    def download(cls, target_dir: str, source: str = "huggingface"):
+    def download(cls, target_dir: str, source: str = "huggingface", python_executable: str = None):
         """下载模型"""
         os.makedirs(target_dir, exist_ok=True)
         
+        # 保存python路径到配置
+        if python_executable:
+            config = load_config()
+            config['python'] = python_executable
+            with open("/tmp/notebook_config.json", "w") as f:
+                json.dump(config, f, indent=2)
+        
         if source == "huggingface":
-            if cls.download_from_hf(target_dir):
+            if cls.download_from_hf(target_dir, python_executable):
                 return True
             print("尝试使用ModelScope...")
-            return cls.download_from_modelscope(target_dir)
+            return cls.download_from_modelscope(target_dir, python_executable)
         else:
-            return cls.download_from_modelscope(target_dir)
+            return cls.download_from_modelscope(target_dir, python_executable)
 
 
 def save_config(repo_dir: str):
