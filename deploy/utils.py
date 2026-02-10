@@ -347,12 +347,14 @@ class ModelDownloader:
     def download_from_hf(cls, target_dir: str) -> bool:
         """从HuggingFace下载"""
         try:
+            # 使用当前Python环境的pip（确保是mamba环境的）
             subprocess.run([
-                "pip", "install", "-q", "huggingface-hub[cli]"
+                sys.executable, "-m", "pip", "install", "-q", "huggingface-hub[cli]"
             ], check=True)
             
+            # 使用 python -m 方式调用，避免PATH问题
             subprocess.run([
-                "huggingface-cli", "download",
+                sys.executable, "-m", "huggingface_hub", "download",
                 cls.MODEL_ID,
                 "--local-dir", target_dir,
                 "--resume-download"
@@ -366,12 +368,14 @@ class ModelDownloader:
     def download_from_modelscope(cls, target_dir: str) -> bool:
         """从ModelScope下载"""
         try:
+            # 使用当前Python环境的pip
             subprocess.run([
-                "pip", "install", "-q", "modelscope"
+                sys.executable, "-m", "pip", "install", "-q", "modelscope"
             ], check=True)
             
+            # 使用 python -m 方式调用
             subprocess.run([
-                "modelscope", "download",
+                sys.executable, "-m", "modelscope", "download",
                 "--model", cls.MODEL_ID,
                 "--local_dir", target_dir
             ], check=True)
