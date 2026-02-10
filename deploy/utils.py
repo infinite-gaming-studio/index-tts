@@ -378,6 +378,15 @@ class ModelDownloader:
             print(f"   模型ID: {cls.MODEL_ID}")
             print(f"   目标目录: {target_dir}")
             
+            # 检查网络连通性
+            print("   检查 HuggingFace 连通性...")
+            import urllib.request
+            try:
+                urllib.request.urlopen('https://huggingface.co', timeout=10)
+                print("   ✅ HuggingFace 可访问")
+            except Exception as e:
+                print(f"   ⚠️ 警告: HuggingFace 可能无法访问 ({e})")
+            
             snapshot_download(
                 repo_id=cls.MODEL_ID,
                 local_dir=target_dir,
@@ -388,6 +397,8 @@ class ModelDownloader:
             return True
         except Exception as e:
             print(f"   ❌ HuggingFace 下载失败: {e}")
+            import traceback
+            print(f"   详细错误:\n{traceback.format_exc()}")
             return False
     
     @classmethod
@@ -404,6 +415,15 @@ class ModelDownloader:
             print(f"   模型ID: {cls.MODELSCOPE_MODEL_ID}")
             print(f"   目标目录: {target_dir}")
             
+            # 检查网络连通性
+            print("   检查 ModelScope 连通性...")
+            import urllib.request
+            try:
+                urllib.request.urlopen('https://www.modelscope.cn', timeout=10)
+                print("   ✅ ModelScope 可访问")
+            except Exception as e:
+                print(f"   ⚠️ 警告: ModelScope 可能无法访问 ({e})")
+            
             snapshot_download(
                 model_id=cls.MODELSCOPE_MODEL_ID,
                 local_dir=target_dir
@@ -412,6 +432,8 @@ class ModelDownloader:
             return True
         except Exception as e:
             print(f"   ❌ ModelScope 下载失败: {e}")
+            import traceback
+            print(f"   详细错误:\n{traceback.format_exc()}")
             return False
     
     @classmethod
@@ -424,6 +446,9 @@ class ModelDownloader:
             source: 下载源，"auto" | "huggingface" | "modelscope"
         """
         os.makedirs(target_dir, exist_ok=True)
+        
+        # 显示当前目录内容（用于调试）
+        print(f"   当前目录内容: {os.listdir(target_dir) if os.path.exists(target_dir) else '目录不存在'}")
         
         # 自动选择下载源（优先HuggingFace）
         if source == "auto":
@@ -440,10 +465,26 @@ class ModelDownloader:
         for name, download_func in sources:
             print(f"\n   尝试从 {name} 下载...")
             if download_func(target_dir):
-                return True
+                # 验证下载结果
+                print(f"   验证下载结果...")
+                files = os.listdir(target_dir)
+                model_files = [f for f in files if f.endswith(('.pt', '.bin', '.pth', '.safetensors', '.ckpt'))]
+                print(f"   下载后文件列表: {files}")
+                print(f"   模型权重文件: {model_files}")
+                
+                if model_files:
+                    print(f"   ✅ 验证成功: 找到 {len(model_files)} 个权重文件")
+                    return True
+                else:
+                    print(f"   ⚠️ 警告: 下载完成但未找到权重文件")
             print(f"   {name} 下载失败，尝试其他源...")
         
         print("\n   ❌ 所有下载源都失败了")
+        print("   可能原因:")
+        print("   1. 网络连接问题（无法访问HuggingFace/ModelScope）")
+        print("   2. 模型ID错误或被移除")
+        print("   3. 存储空间不足")
+        print("   4. 权限问题")
         return False
 
 
