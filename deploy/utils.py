@@ -339,83 +339,112 @@ class DependencyInstaller:
 
 
 class ModelDownloader:
-    """模型下载器"""
+    """模型下载器 - 使用Python API而非命令行"""
     
     MODEL_ID = "IndexTeam/IndexTTS-2"
+    MODELSCOPE_MODEL_ID = "IndexTeam/IndexTTS-2"
     
     @classmethod
-    def _get_python_executable(cls, python_executable: str = None) -> str:
-        """获取Python可执行文件路径"""
-        if python_executable:
-            return python_executable
-        # 检查是否有配置的Python路径（从notebook配置）
-        config = load_config()
-        if 'python' in config and os.path.exists(config['python']):
-            return config['python']
-        return sys.executable
-    
-    @classmethod
-    def download_from_hf(cls, target_dir: str, python_executable: str = None) -> bool:
-        """从HuggingFace下载"""
-        python = cls._get_python_executable(python_executable)
+    def _ensure_package(cls, package_name: str, import_name: str = None):
+        """确保包已安装，如未安装则自动安装"""
+        import_name = import_name or package_name
         try:
-            # 使用指定Python环境的pip
-            subprocess.run([
-                python, "-m", "pip", "install", "-q", "huggingface-hub[cli]"
-            ], check=True)
+            __import__(import_name)
+            return True
+        except ImportError:
+            print(f"   安装 {package_name}...")
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", package_name],
+                    check=True,
+                    capture_output=True
+                )
+                return True
+            except Exception as e:
+                print(f"   ⚠️ 安装 {package_name} 失败: {e}")
+                return False
+    
+    @classmethod
+    def download_from_hf(cls, target_dir: str) -> bool:
+        """从HuggingFace下载 - 使用Python API"""
+        # 确保 huggingface-hub 已安装
+        if not cls._ensure_package("huggingface-hub", "huggingface_hub"):
+            return False
+        
+        try:
+            from huggingface_hub import snapshot_download
             
-            # 使用 python -m 方式调用，避免PATH问题
-            subprocess.run([
-                python, "-m", "huggingface_hub", "download",
-                cls.MODEL_ID,
-                "--local-dir", target_dir,
-                "--resume-download"
-            ], check=True)
+            print(f"   从 HuggingFace 下载模型...")
+            print(f"   模型ID: {cls.MODEL_ID}")
+            print(f"   目标目录: {target_dir}")
+            
+            snapshot_download(
+                repo_id=cls.MODEL_ID,
+                local_dir=target_dir,
+                resume_download=True,
+                local_dir_use_symlinks=False
+            )
+            print("   ✅ HuggingFace 下载成功")
             return True
         except Exception as e:
-            print(f"HuggingFace下载失败: {e}")
+            print(f"   ❌ HuggingFace 下载失败: {e}")
             return False
     
     @classmethod
-    def download_from_modelscope(cls, target_dir: str, python_executable: str = None) -> bool:
-        """从ModelScope下载"""
-        python = cls._get_python_executable(python_executable)
+    def download_from_modelscope(cls, target_dir: str) -> bool:
+        """从ModelScope下载 - 使用Python API"""
+        # 确保 modelscope 已安装
+        if not cls._ensure_package("modelscope"):
+            return False
+        
         try:
-            # 使用指定Python环境的pip
-            subprocess.run([
-                python, "-m", "pip", "install", "-q", "modelscope"
-            ], check=True)
+            from modelscope.hub.snapshot_download import snapshot_download
             
-            # 使用 python -m 方式调用
-            subprocess.run([
-                python, "-m", "modelscope", "download",
-                "--model", cls.MODEL_ID,
-                "--local_dir", target_dir
-            ], check=True)
+            print(f"   从 ModelScope 下载模型...")
+            print(f"   模型ID: {cls.MODELSCOPE_MODEL_ID}")
+            print(f"   目标目录: {target_dir}")
+            
+            snapshot_download(
+                model_id=cls.MODELSCOPE_MODEL_ID,
+                local_dir=target_dir
+            )
+            print("   ✅ ModelScope 下载成功")
             return True
         except Exception as e:
-            print(f"ModelScope下载失败: {e}")
+            print(f"   ❌ ModelScope 下载失败: {e}")
             return False
     
     @classmethod
-    def download(cls, target_dir: str, source: str = "huggingface", python_executable: str = None):
-        """下载模型"""
+    def download(cls, target_dir: str, source: str = "auto"):
+        """
+        下载模型
+        
+        Args:
+            target_dir: 下载目标目录
+            source: 下载源，"auto" | "huggingface" | "modelscope"
+        """
         os.makedirs(target_dir, exist_ok=True)
         
-        # 保存python路径到配置
-        if python_executable:
-            config = load_config()
-            config['python'] = python_executable
-            with open("/tmp/notebook_config.json", "w") as f:
-                json.dump(config, f, indent=2)
-        
-        if source == "huggingface":
-            if cls.download_from_hf(target_dir, python_executable):
-                return True
-            print("尝试使用ModelScope...")
-            return cls.download_from_modelscope(target_dir, python_executable)
+        # 自动选择下载源（优先HuggingFace）
+        if source == "auto":
+            sources = [("huggingface", cls.download_from_hf), 
+                       ("modelscope", cls.download_from_modelscope)]
+        elif source == "huggingface":
+            sources = [("huggingface", cls.download_from_hf)]
+        elif source == "modelscope":
+            sources = [("modelscope", cls.download_from_modelscope)]
         else:
-            return cls.download_from_modelscope(target_dir, python_executable)
+            sources = [("huggingface", cls.download_from_hf), 
+                       ("modelscope", cls.download_from_modelscope)]
+        
+        for name, download_func in sources:
+            print(f"\n   尝试从 {name} 下载...")
+            if download_func(target_dir):
+                return True
+            print(f"   {name} 下载失败，尝试其他源...")
+        
+        print("\n   ❌ 所有下载源都失败了")
+        return False
 
 
 def save_config(repo_dir: str):
