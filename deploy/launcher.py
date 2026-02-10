@@ -54,6 +54,9 @@ class ServiceLauncher:
         service_script = Path(__file__).parent / "service.py"
         repo_dir = self.config.get("repo_dir", "/tmp/index-tts")
         
+        # 设置日志文件路径
+        log_path = os.path.join(repo_dir, "service.log")
+        
         # 检查模型是否存在
         checkpoint_dir = os.path.join(repo_dir, "checkpoints")
         config_file = os.path.join(checkpoint_dir, "config.yaml")
@@ -83,7 +86,11 @@ class ServiceLauncher:
         
         print(f"🚀 启动服务 (端口: {port}, 模式: {mode})...")
         
-        # 启动服务进程 - 日志直接输出到控制台
+        # 打开日志文件
+        log_file = open(log_path, 'w')
+        self.log_file = log_file
+        
+        # 启动服务进程 - 日志输出到文件
         cmd = [
             sys.executable,
             "-u",  # 无缓冲输出
@@ -93,11 +100,11 @@ class ServiceLauncher:
             "--repo-dir", repo_dir
         ]
         
-        # 使用subprocess启动，输出直接显示
+        # 使用subprocess启动，输出重定向到日志文件
         process = subprocess.Popen(
             cmd,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
             cwd=repo_dir
         )
@@ -115,14 +122,8 @@ class ServiceLauncher:
         time.sleep(2)
         if self.process.poll() is not None:
             print("\n❌ 服务启动失败，进程立即退出")
-            # 读取并显示错误信息
-            if process.stderr:
-                stderr_output = process.stderr.read().decode('utf-8', errors='ignore')
-                if stderr_output:
-                    print("\n错误信息:")
-                    print(stderr_output)
             
-            # 也读取日志文件
+            # 读取日志文件
             if os.path.exists(log_path):
                 with open(log_path, 'r') as f:
                     log_content = f.read()
