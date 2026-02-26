@@ -320,35 +320,42 @@ class DependencyInstaller:
                 print("✅ PyTorch (标准版) 安装完成")
     
     @classmethod
-    def install_flash_attn(cls, force: bool = False):
+    def install_flash_attn(cls, force: bool = False, python_path: str = None):
         """安装 flash-attention (Accel加速必需)
         
         Args:
             force: 强制重新安装
+            python_path: 指定Python解释器路径，默认使用sys.executable
         """
-        # 检查是否已安装
+        python = python_path or sys.executable
+        
+        # 检查是否已安装（使用指定的Python）
         if not force:
             try:
-                import flash_attn
-                print(f"✅ flash-attention 已安装 ({flash_attn.__version__})")
-                return True
-            except ImportError:
+                result = subprocess.run(
+                    [python, "-c", "import flash_attn; print(flash_attn.__version__)"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    print(f"✅ flash-attention 已安装 ({result.stdout.strip()})")
+                    return True
+            except Exception:
                 pass
         
-        print("📦 安装 flash-attention (Accel加速必需，约需5-10分钟)...")
+        print(f"📦 安装 flash-attention 到 {python} (Accel加速必需，约需5-10分钟)...")
         print("⏳ 正在编译安装，请耐心等待...")
         
         try:
             # 安装依赖
             subprocess.run([
-                sys.executable, "-m", "pip", "install", "-q",
+                python, "-m", "pip", "install", "-q",
                 "ninja", "packaging"
             ], check=True)
             
             # 安装 flash-attn (从源码编译)
             # 使用 --no-build-isolation 避免隔离环境缺少依赖
             result = subprocess.run([
-                sys.executable, "-m", "pip", "install", "-v",
+                python, "-m", "pip", "install", "-v",
                 "flash-attn", "--no-build-isolation"
             ], capture_output=True, text=True, timeout=600)  # 10分钟超时
             
@@ -367,19 +374,30 @@ class DependencyInstaller:
             return False
     
     @classmethod
-    def install_deepspeed(cls):
-        """安装 DeepSpeed (可选加速)"""
+    def install_deepspeed(cls, python_path: str = None):
+        """安装 DeepSpeed (可选加速)
+        
+        Args:
+            python_path: 指定Python解释器路径，默认使用sys.executable
+        """
+        python = python_path or sys.executable
+        
+        # 检查是否已安装
         try:
-            import deepspeed
-            print(f"✅ DeepSpeed 已安装")
-            return True
-        except ImportError:
+            result = subprocess.run(
+                [python, "-c", "import deepspeed; print('ok')"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                print(f"✅ DeepSpeed 已安装")
+                return True
+        except Exception:
             pass
         
-        print("📦 安装 DeepSpeed (可选，约需2-5分钟)...")
+        print(f"📦 安装 DeepSpeed 到 {python} (可选，约需2-5分钟)...")
         try:
             subprocess.run([
-                sys.executable, "-m", "pip", "install", "-q", "deepspeed"
+                python, "-m", "pip", "install", "-q", "deepspeed"
             ], check=True, timeout=300)
             print("✅ DeepSpeed 安装成功")
             return True
