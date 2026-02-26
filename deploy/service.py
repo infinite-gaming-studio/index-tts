@@ -98,10 +98,27 @@ class TTSApp:
             print("📓 检测到Notebook环境 (Colab/Kaggle)")
             # 在Notebook环境中，降低部分优化的要求
             use_torch_compile = False  # torch.compile在某些Notebook环境可能不稳定
-            # DeepSpeed和CUDA内核保持启用，但失败时会自动回退
+            
+            # 检查 flash_attn 是否安装（Accel必需）
+            try:
+                import flash_attn
+                print(f"✅ flash_attn 已安装 ({flash_attn.__version__})")
+            except ImportError:
+                print("⚠️ flash_attn 未安装，禁用 Accel 加速")
+                print("💡 如需启用，请运行: pip install flash-attn --no-build-isolation")
+                use_accel = False
+            
+            # 检查 DeepSpeed 是否安装
+            try:
+                import deepspeed
+                print(f"✅ DeepSpeed 已安装")
+            except ImportError:
+                print("⚠️ DeepSpeed 未安装，将自动回退到标准推理")
+                # DeepSpeed是可选的，保持启用让infer_v2自动处理
         
         print(f"🚀 启用优化: FP16={self.config.use_fp16}, Accel={use_accel}, DeepSpeed={use_deepspeed}, CUDA内核={use_cuda_kernel}, Torch编译={use_torch_compile}")
         
+        # 尝试加载模型，分阶段启用优化
         try:
             self.tts = IndexTTS2(
                 cfg_path=self.config.cfg_path,
@@ -114,19 +131,45 @@ class TTSApp:
                 use_torch_compile=use_torch_compile
             )
         except Exception as e:
-            print(f"⚠️ 启用全部优化失败: {e}")
-            print("🔄 回退到基础配置...")
-            # 回退到最基础的配置
-            self.tts = IndexTTS2(
-                cfg_path=self.config.cfg_path,
-                model_dir=self.config.model_dir,
-                use_fp16=self.config.use_fp16,
-                device=self.config.device,
-                use_accel=False,
-                use_deepspeed=False,
-                use_cuda_kernel=False,
-                use_torch_compile=False
-            )
+            error_msg = str(e).lower()
+            
+            # 如果是缺少 flash_attn，禁用 Accel 后重试
+            if "flash_attn" in error_msg or "flash attention" in error_msg:
+                print(f"⚠️ Accel需要flash_attn但未安装: {e}")
+                print("🔄 禁用 Accel 后重试...")
+                use_accel = False
+                try:
+                    self.tts = IndexTTS2(
+                        cfg_path=self.config.cfg_path,
+                        model_dir=self.config.model_dir,
+                        use_fp16=self.config.use_fp16,
+                        device=self.config.device,
+                        use_accel=False,
+                        use_deepspeed=use_deepspeed,
+                        use_cuda_kernel=use_cuda_kernel,
+                        use_torch_compile=use_torch_compile
+                    )
+                except Exception as e2:
+                    print(f"⚠️ 仍然失败: {e2}")
+                    print("🔄 回退到最基础配置...")
+                    self._fallback_to_basic_config()
+            else:
+                print(f"⚠️ 启用优化失败: {e}")
+                print("🔄 回退到基础配置...")
+                self._fallback_to_basic_config()
+    
+    def _fallback_to_basic_config(self):
+        """回退到最基础的配置"""
+        self.tts = IndexTTS2(
+            cfg_path=self.config.cfg_path,
+            model_dir=self.config.model_dir,
+            use_fp16=self.config.use_fp16,
+            device=self.config.device,
+            use_accel=False,
+            use_deepspeed=False,
+            use_cuda_kernel=False,
+            use_torch_compile=False
+        )
         
         elapsed = time.time() - start_time
         print("="*60)
