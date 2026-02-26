@@ -320,22 +320,106 @@ class DependencyInstaller:
                 print("✅ PyTorch (标准版) 安装完成")
     
     @classmethod
-    def install_deps(cls, use_mamba: bool = True, in_colab: bool = False, in_kaggle: bool = False):
-        """安装核心依赖 (python/cuda 已在Cell 1用mamba安装)
+    def install_flash_attn(cls, force: bool = False):
+        """安装 flash-attention (Accel加速必需)
         
+        Args:
+            force: 强制重新安装
+        """
+        # 检查是否已安装
+        if not force:
+            try:
+                import flash_attn
+                print(f"✅ flash-attention 已安装 ({flash_attn.__version__})")
+                return True
+            except ImportError:
+                pass
+        
+        print("📦 安装 flash-attention (Accel加速必需，约需5-10分钟)...")
+        print("⏳ 正在编译安装，请耐心等待...")
+        
+        try:
+            # 安装依赖
+            subprocess.run([
+                sys.executable, "-m", "pip", "install", "-q",
+                "ninja", "packaging"
+            ], check=True)
+            
+            # 安装 flash-attn (从源码编译)
+            # 使用 --no-build-isolation 避免隔离环境缺少依赖
+            result = subprocess.run([
+                sys.executable, "-m", "pip", "install", "-v",
+                "flash-attn", "--no-build-isolation"
+            ], capture_output=True, text=True, timeout=600)  # 10分钟超时
+            
+            if result.returncode == 0:
+                print("✅ flash-attention 安装成功")
+                return True
+            else:
+                print(f"⚠️ flash-attention 安装失败")
+                print(f"错误: {result.stderr[:500]}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("⚠️ flash-attention 安装超时 (>10分钟)")
+            return False
+        except Exception as e:
+            print(f"⚠️ flash-attention 安装异常: {e}")
+            return False
+    
+    @classmethod
+    def install_deepspeed(cls):
+        """安装 DeepSpeed (可选加速)"""
+        try:
+            import deepspeed
+            print(f"✅ DeepSpeed 已安装")
+            return True
+        except ImportError:
+            pass
+        
+        print("📦 安装 DeepSpeed (可选，约需2-5分钟)...")
+        try:
+            subprocess.run([
+                sys.executable, "-m", "pip", "install", "-q", "deepspeed"
+            ], check=True, timeout=300)
+            print("✅ DeepSpeed 安装成功")
+            return True
+        except Exception as e:
+            print(f"⚠️ DeepSpeed 安装失败: {e}")
+            print("💡 DeepSpeed 是可选依赖，服务仍可正常运行")
+            return False
+
+    @classmethod
+    def install_deps(cls, use_mamba: bool = True, in_colab: bool = False, in_kaggle: bool = False, 
+                     install_flash: bool = True, install_ds: bool = True):
+        """安装核心依赖 (python/cuda 已在Cell 1用mamba安装)
+
         Args:
             use_mamba: Cell 1是否成功安装了mamba（仅用于显示信息）
             in_colab: 是否在Colab环境
             in_kaggle: 是否在Kaggle环境
+            install_flash: 是否安装 flash-attention (Accel加速必需，耗时5-10分钟)
+            install_ds: 是否安装 DeepSpeed (可选加速，耗时2-5分钟)
         """
         # 安装PyTorch
         cls.install_pytorch()
-        
+
         # 安装其他依赖
         print("📦 安装核心依赖...")
         for dep in cls.CORE_DEPS:
             subprocess.run(["pip", "install", "-q", dep], check=True)
         print("✅ 核心依赖安装完成")
+        
+        # 安装 flash-attention (可选，用于Accel加速)
+        if install_flash:
+            flash_installed = cls.install_flash_attn()
+            if not flash_installed:
+                print("⚠️ flash-attention 安装失败，Accel加速将不可用")
+                print("💡 服务仍可正常运行，但速度较慢 (RTF ~0.5)")
+                print("💡 安装 flash-attention 后可提升至 RTF ~0.2 (2.5倍提速)")
+        
+        # 安装 DeepSpeed (可选)
+        if install_ds:
+            cls.install_deepspeed()
 
 
 class ModelDownloader:
