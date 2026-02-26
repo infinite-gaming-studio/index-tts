@@ -34,6 +34,12 @@ class TTSConfig:
         self.use_fp16 = True
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.api_token = os.environ.get("INDEXTTS_API_TOKEN")  # API鉴权token
+        
+        # 加速优化选项
+        self.use_accel = True  # GPT加速引擎 (FlashAttention优化)
+        self.use_deepspeed = True  # DeepSpeed推理加速
+        self.use_cuda_kernel = True  # BigVGAN CUDA内核加速
+        self.use_torch_compile = False  # PyTorch编译优化 (Colab/Kaggle可能有兼容性问题)
     
     def _get_repo_dir(self):
         """获取项目根目录"""
@@ -79,18 +85,55 @@ class TTSApp:
         if not os.path.exists(self.config.cfg_path):
             raise FileNotFoundError(f"找不到配置文件: {self.config.cfg_path}")
         
-        self.tts = IndexTTS2(
-            cfg_path=self.config.cfg_path,
-            model_dir=self.config.model_dir,
-            use_fp16=self.config.use_fp16,
-            device=self.config.device
-        )
+        # 检测是否在Colab/Kaggle环境
+        is_notebook_env = self._is_notebook_environment()
+        
+        # 根据环境自动调整优化选项
+        use_accel = self.config.use_accel
+        use_deepspeed = self.config.use_deepspeed
+        use_cuda_kernel = self.config.use_cuda_kernel
+        use_torch_compile = self.config.use_torch_compile
+        
+        if is_notebook_env:
+            print("📓 检测到Notebook环境 (Colab/Kaggle)")
+            # 在Notebook环境中，降低部分优化的要求
+            use_torch_compile = False  # torch.compile在某些Notebook环境可能不稳定
+            # DeepSpeed和CUDA内核保持启用，但失败时会自动回退
+        
+        print(f"🚀 启用优化: FP16={self.config.use_fp16}, Accel={use_accel}, DeepSpeed={use_deepspeed}, CUDA内核={use_cuda_kernel}, Torch编译={use_torch_compile}")
+        
+        try:
+            self.tts = IndexTTS2(
+                cfg_path=self.config.cfg_path,
+                model_dir=self.config.model_dir,
+                use_fp16=self.config.use_fp16,
+                device=self.config.device,
+                use_accel=use_accel,
+                use_deepspeed=use_deepspeed,
+                use_cuda_kernel=use_cuda_kernel,
+                use_torch_compile=use_torch_compile
+            )
+        except Exception as e:
+            print(f"⚠️ 启用全部优化失败: {e}")
+            print("🔄 回退到基础配置...")
+            # 回退到最基础的配置
+            self.tts = IndexTTS2(
+                cfg_path=self.config.cfg_path,
+                model_dir=self.config.model_dir,
+                use_fp16=self.config.use_fp16,
+                device=self.config.device,
+                use_accel=False,
+                use_deepspeed=False,
+                use_cuda_kernel=False,
+                use_torch_compile=False
+            )
         
         elapsed = time.time() - start_time
         print("="*60)
         print(f"✅ 模型加载完成!")
-        print(f"   耗时: {elapsed:.1f}秒")
-        print(f"   设备: {self.config.device}")
+        print(f" 耗时: {elapsed:.1f}秒")
+        print(f" 设备: {self.config.device}")
+        print(f" 实际启用的优化: Accel={getattr(self.tts, 'use_accel', False)}, DeepSpeed={getattr(self.tts, 'use_deepspeed', False)}, CUDA内核={getattr(self.tts, 'use_cuda_kernel', False)}")
         print("="*60, flush=True)
     
     def _verify_token(self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
@@ -216,13 +259,36 @@ class TTSApp:
         
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
     
+    def _is_notebook_environment(self):
+        """检测是否在Notebook环境（Colab/Kaggle）"""
+        try:
+            # 检测是否在Colab
+            import google.colab
+            return True
+        except ImportError:
+            pass
+        
+        # 检测是否在Kaggle
+        if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None:
+            return True
+        
+        # 检测Jupyter Notebook
+        try:
+            from IPython import get_ipython
+            if get_ipython() is not None:
+                return True
+        except ImportError:
+            pass
+        
+        return False
+    
     def run(self):
         """运行服务"""
         print("\n" + "="*60)
         print("🚀 启动服务...")
-        print(f"   地址: http://0.0.0.0:{self.config.port}")
-        print(f"   API文档: http://localhost:{self.config.port}/docs")
-        print(f"   WebUI: http://localhost:{self.config.port}/ui")
+        print(f" 地址: http://0.0.0.0:{self.config.port}")
+        print(f" API文档: http://localhost:{self.config.port}/docs")
+        print(f" WebUI: http://localhost:{self.config.port}/ui")
         print("="*60 + "\n", flush=True)
         uvicorn.run(self.app, host="0.0.0.0", port=self.config.port)
 
@@ -232,11 +298,21 @@ def main():
     parser = argparse.ArgumentParser(description="IndexTTS2 部署服务")
     parser.add_argument("--port", type=int, default=8000, help="服务端口")
     parser.add_argument("--mode", choices=["api", "webui", "both"], default="both",
-                       help="部署模式: api仅API, webui仅WebUI, both两者")
+                        help="部署模式: api仅API, webui仅WebUI, both两者")
     parser.add_argument("--repo-dir", type=str, default=None,
-                       help="项目根目录路径")
+                        help="项目根目录路径")
     parser.add_argument("--no-fp16", action="store_true",
-                       help="禁用FP16")
+                        help="禁用FP16")
+    
+    # 加速优化选项
+    parser.add_argument("--no-accel", action="store_true",
+                        help="禁用GPT加速引擎")
+    parser.add_argument("--no-deepspeed", action="store_true",
+                        help="禁用DeepSpeed")
+    parser.add_argument("--no-cuda-kernel", action="store_true",
+                        help="禁用CUDA内核")
+    parser.add_argument("--torch-compile", action="store_true",
+                        help="启用PyTorch编译优化 (不推荐在Colab/Kaggle使用)")
 
     args = parser.parse_args()
 
@@ -253,10 +329,15 @@ def main():
     config.port = args.port
     config.mode = args.mode
     config.use_fp16 = not args.no_fp16
+    config.use_accel = not args.no_accel
+    config.use_deepspeed = not args.no_deepspeed
+    config.use_cuda_kernel = not args.no_cuda_kernel
+    config.use_torch_compile = args.torch_compile
 
-    print(f"   模式: {config.mode}")
-    print(f"   端口: {config.port}")
-    print(f"   项目路径: {config.repo_dir}")
+    print(f" 模式: {config.mode}")
+    print(f" 端口: {config.port}")
+    print(f" 项目路径: {config.repo_dir}")
+    print(f" 加速优化: FP16={config.use_fp16}, Accel={config.use_accel}, DeepSpeed={config.use_deepspeed}, CUDA内核={config.use_cuda_kernel}, Torch编译={config.use_torch_compile}")
     print("="*60 + "\n", flush=True)
 
     # 启动服务
