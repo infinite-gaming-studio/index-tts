@@ -34,157 +34,72 @@ class TTSConfig:
         self.use_fp16 = True
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.api_token = os.environ.get("INDEXTTS_API_TOKEN")  # API鉴权token
-        
-        # 加速优化选项
-        self.use_accel = True  # GPT加速引擎 (FlashAttention优化)
-        self.use_deepspeed = True  # DeepSpeed推理加速
-        self.use_cuda_kernel = True  # BigVGAN CUDA内核加速
-        self.use_torch_compile = False  # PyTorch编译优化 (Colab/Kaggle可能有兼容性问题)
-    
+
     def _get_repo_dir(self):
         """获取项目根目录"""
         # 方式1: 环境变量
         repo_dir = os.environ.get("INDEXTTS_REPO_DIR")
         if repo_dir:
             return repo_dir
-        
+
         # 方式2: 配置文件
         config_file = "/tmp/notebook_config.json"
         if os.path.exists(config_file):
             with open(config_file) as f:
                 config = json.load(f)
-                return config.get("repo_dir", "/tmp/index-tts")
-        
+            return config.get("repo_dir", "/tmp/index-tts")
+
         # 方式3: 相对路径
         return str(Path(__file__).parent.parent)
 
 
 class TTSApp:
     """TTS应用服务"""
-    
+
     def __init__(self, config: TTSConfig = None):
         self.config = config or TTSConfig()
         self.tts = None
         self.app = FastAPI(title="IndexTTS2")
         self.security = HTTPBearer(auto_error=False)
         self._setup_routes()
-    
+
     def load_model(self):
         """加载模型"""
         import time
         start_time = time.time()
-        
+
         print("="*60)
         print("🔄 开始加载模型...")
-        print(f"   配置文件: {self.config.cfg_path}")
-        print(f"   模型目录: {self.config.model_dir}")
-        print(f"   设备: {self.config.device}")
-        print(f"   FP16: {self.config.use_fp16}")
+        print(f" 配置文件: {self.config.cfg_path}")
+        print(f" 模型目录: {self.config.model_dir}")
+        print(f" 设备: {self.config.device}")
+        print(f" FP16: {self.config.use_fp16}")
         print("="*60, flush=True)
-        
+
         if not os.path.exists(self.config.cfg_path):
             raise FileNotFoundError(f"找不到配置文件: {self.config.cfg_path}")
-        
-        # 检测是否在Colab/Kaggle环境
-        is_notebook_env = self._is_notebook_environment()
-        
-        # 根据环境自动调整优化选项
-        use_accel = self.config.use_accel
-        use_deepspeed = self.config.use_deepspeed
-        use_cuda_kernel = self.config.use_cuda_kernel
-        use_torch_compile = self.config.use_torch_compile
-        
-        if is_notebook_env:
-            print("📓 检测到Notebook环境 (Colab/Kaggle)")
-            # 在Notebook环境中，降低部分优化的要求
-            use_torch_compile = False  # torch.compile在某些Notebook环境可能不稳定
-            
-            # 检查 flash_attn 是否安装（Accel必需）
-            try:
-                import flash_attn
-                print(f"✅ flash_attn 已安装 ({flash_attn.__version__})")
-            except ImportError:
-                print("⚠️ flash_attn 未安装，禁用 Accel 加速")
-                print("💡 如需启用，请运行: pip install flash-attn --no-build-isolation")
-                use_accel = False
-            
-            # 检查 DeepSpeed 是否安装
-            try:
-                import deepspeed
-                print(f"✅ DeepSpeed 已安装")
-            except ImportError:
-                print("⚠️ DeepSpeed 未安装，将自动回退到标准推理")
-                # DeepSpeed是可选的，保持启用让infer_v2自动处理
-        
-        print(f"🚀 启用优化: FP16={self.config.use_fp16}, Accel={use_accel}, DeepSpeed={use_deepspeed}, CUDA内核={use_cuda_kernel}, Torch编译={use_torch_compile}")
-        
-        # 尝试加载模型，分阶段启用优化
-        try:
-            self.tts = IndexTTS2(
-                cfg_path=self.config.cfg_path,
-                model_dir=self.config.model_dir,
-                use_fp16=self.config.use_fp16,
-                device=self.config.device,
-                use_accel=use_accel,
-                use_deepspeed=use_deepspeed,
-                use_cuda_kernel=use_cuda_kernel,
-                use_torch_compile=use_torch_compile
-            )
-        except Exception as e:
-            error_msg = str(e).lower()
-            
-            # 如果是缺少 flash_attn，禁用 Accel 后重试
-            if "flash_attn" in error_msg or "flash attention" in error_msg:
-                print(f"⚠️ Accel需要flash_attn但未安装: {e}")
-                print("🔄 禁用 Accel 后重试...")
-                use_accel = False
-                try:
-                    self.tts = IndexTTS2(
-                        cfg_path=self.config.cfg_path,
-                        model_dir=self.config.model_dir,
-                        use_fp16=self.config.use_fp16,
-                        device=self.config.device,
-                        use_accel=False,
-                        use_deepspeed=use_deepspeed,
-                        use_cuda_kernel=use_cuda_kernel,
-                        use_torch_compile=use_torch_compile
-                    )
-                except Exception as e2:
-                    print(f"⚠️ 仍然失败: {e2}")
-                    print("🔄 回退到最基础配置...")
-                    self._fallback_to_basic_config()
-            else:
-                print(f"⚠️ 启用优化失败: {e}")
-                print("🔄 回退到基础配置...")
-                self._fallback_to_basic_config()
-    
-    def _fallback_to_basic_config(self):
-        """回退到最基础的配置"""
+
+        # 加载模型（简化版本，无加速选项）
         self.tts = IndexTTS2(
             cfg_path=self.config.cfg_path,
             model_dir=self.config.model_dir,
             use_fp16=self.config.use_fp16,
-            device=self.config.device,
-            use_accel=False,
-            use_deepspeed=False,
-            use_cuda_kernel=False,
-            use_torch_compile=False
+            device=self.config.device
         )
-        
+
         elapsed = time.time() - start_time
         print("="*60)
         print(f"✅ 模型加载完成!")
         print(f" 耗时: {elapsed:.1f}秒")
         print(f" 设备: {self.config.device}")
-        print(f" 实际启用的优化: Accel={getattr(self.tts, 'use_accel', False)}, DeepSpeed={getattr(self.tts, 'use_deepspeed', False)}, CUDA内核={getattr(self.tts, 'use_cuda_kernel', False)}")
         print("="*60, flush=True)
-    
+
     def _verify_token(self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
         """验证API Token"""
         # 如果没有配置token，则无需鉴权
         if not self.config.api_token:
             return True
-        
+
         # 检查token
         if not credentials:
             raise HTTPException(
@@ -192,7 +107,7 @@ class TTSApp:
                 detail="Missing authentication token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         if credentials.credentials != self.config.api_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -203,7 +118,7 @@ class TTSApp:
 
     def _setup_routes(self):
         """设置路由"""
-        
+
         @self.app.post("/api/tts")
         async def tts(
             text: str = Form(...),
@@ -215,15 +130,15 @@ class TTSApp:
             try:
                 if self.tts is None:
                     return JSONResponse(
-                        status_code=503, 
+                        status_code=503,
                         content={"error": "模型未加载"}
                     )
-                
+
                 # 保存参考音频
                 with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                     shutil.copyfileobj(spk_audio.file, tmp)
                     spk_path = tmp.name
-                
+
                 # 生成音频
                 output = "/tmp/out.wav"
                 self.tts.infer(
@@ -234,14 +149,14 @@ class TTSApp:
                     verbose=False
                 )
                 os.unlink(spk_path)
-                
+
                 return FileResponse(output, media_type="audio/wav")
             except Exception as e:
                 return JSONResponse(
-                    status_code=500, 
+                    status_code=500,
                     content={"error": str(e)}
                 )
-        
+
         @self.app.get("/api/health")
         async def health():
             """健康检查 (公开接口，无需鉴权)"""
@@ -251,7 +166,7 @@ class TTSApp:
                 "device": str(self.tts.device if self.tts else "not loaded"),
                 "loaded": self.tts is not None
             }
-        
+
         @self.app.get("/")
         async def root():
             """首页"""
@@ -259,7 +174,7 @@ class TTSApp:
             <h1>🎙️ IndexTTS2 服务</h1>
             <p>API: <code>POST /api/tts</code> | WebUI: <a href="/ui">/ui</a> | Docs: <a href="/docs">/docs</a></p>
             """)
-    
+
     def setup_webui(self):
         """配置WebUI - 使用HTML iframe内嵌base64音频，绕过Gradio文件服务"""
         if self.tts is None:
@@ -279,12 +194,12 @@ class TTSApp:
             # 读取并转为base64
             with open(out, 'rb') as f:
                 audio_bytes = f.read()
-            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
             # 使用HTML5 audio标签播放base64音频
             html = f'''<audio controls style="width:100%;" autoplay>
-  <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
-  您的浏览器不支持音频播放。
-</audio>'''
+            <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
+            您的浏览器不支持音频播放。
+            '''
             return html
 
         with gr.Blocks(title="IndexTTS2") as demo:
@@ -298,33 +213,10 @@ class TTSApp:
                 with gr.Column():
                     gr.Markdown("### 生成结果")
                     out = gr.HTML()
-            btn.click(ui_tts, [txt, aud, alpha], out)
-        
+                btn.click(ui_tts, [txt, aud, alpha], out)
+
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
-    
-    def _is_notebook_environment(self):
-        """检测是否在Notebook环境（Colab/Kaggle）"""
-        try:
-            # 检测是否在Colab
-            import google.colab
-            return True
-        except ImportError:
-            pass
-        
-        # 检测是否在Kaggle
-        if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None:
-            return True
-        
-        # 检测Jupyter Notebook
-        try:
-            from IPython import get_ipython
-            if get_ipython() is not None:
-                return True
-        except ImportError:
-            pass
-        
-        return False
-    
+
     def run(self):
         """运行服务"""
         print("\n" + "="*60)
@@ -346,16 +238,6 @@ def main():
                         help="项目根目录路径")
     parser.add_argument("--no-fp16", action="store_true",
                         help="禁用FP16")
-    
-    # 加速优化选项
-    parser.add_argument("--no-accel", action="store_true",
-                        help="禁用GPT加速引擎")
-    parser.add_argument("--no-deepspeed", action="store_true",
-                        help="禁用DeepSpeed")
-    parser.add_argument("--no-cuda-kernel", action="store_true",
-                        help="禁用CUDA内核")
-    parser.add_argument("--torch-compile", action="store_true",
-                        help="启用PyTorch编译优化 (不推荐在Colab/Kaggle使用)")
 
     args = parser.parse_args()
 
@@ -372,15 +254,11 @@ def main():
     config.port = args.port
     config.mode = args.mode
     config.use_fp16 = not args.no_fp16
-    config.use_accel = not args.no_accel
-    config.use_deepspeed = not args.no_deepspeed
-    config.use_cuda_kernel = not args.no_cuda_kernel
-    config.use_torch_compile = args.torch_compile
 
     print(f" 模式: {config.mode}")
     print(f" 端口: {config.port}")
     print(f" 项目路径: {config.repo_dir}")
-    print(f" 加速优化: FP16={config.use_fp16}, Accel={config.use_accel}, DeepSpeed={config.use_deepspeed}, CUDA内核={config.use_cuda_kernel}, Torch编译={config.use_torch_compile}")
+    print(f" FP16: {config.use_fp16}")
     print("="*60 + "\n", flush=True)
 
     # 启动服务
