@@ -38,7 +38,7 @@ python deploy/service.py --mode api
 
 ### 1. 语音合成
 
-将文本转换为语音，使用参考音频克隆音色。
+将文本转换为语音，使用参考音频克隆音色，支持 4 种情感控制模式。
 
 - **URL**: `/api/tts`
 - **Method**: `POST`
@@ -57,14 +57,61 @@ Authorization: Bearer <your-token>
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `text` | string | 是 | - | 要合成的文本内容 |
-| `spk_audio` | file | 是 | - | 参考音频文件（支持 WAV、MP3 等格式） |
+| `spk_audio` | file | 是 | - | 音色参考音频文件（支持 WAV、MP3 等格式） |
+| `emo_mode` | int | 否 | 0 | 情感控制模式（见下表） |
 | `emo_alpha` | float | 否 | 1.0 | 情感强度系数（0.0 - 2.0） |
+| `emo_audio` | file | 否 | - | 情感参考音频（`emo_mode=1` 时使用） |
+| `emo_vector` | string | 否 | - | 8维情感向量 JSON 数组（`emo_mode=2` 时使用） |
+| `emo_text` | string | 否 | - | 情感描述文本（`emo_mode=3` 时使用） |
+| `use_random` | bool | 否 | false | 情感随机采样（`emo_mode=2` 时可用） |
+| `do_sample` | bool | 否 | true | 是否进行采样 |
+| `top_p` | float | 否 | 0.8 | Top-p 采样参数 |
+| `top_k` | int | 否 | 30 | Top-k 采样参数 |
+| `temperature` | float | 否 | 0.8 | 温度参数 |
+| `length_penalty` | float | 否 | 0.0 | 长度惩罚 |
+| `num_beams` | int | 否 | 3 | Beam search 宽度 |
+| `repetition_penalty` | float | 否 | 10.0 | 重复惩罚 |
+| `max_mel_tokens` | int | 否 | 1500 | 最大生成 token 数 |
+| `max_text_tokens_per_segment` | int | 否 | 120 | 分句最大 token 数 |
+
+#### 情感控制模式 (emo_mode)
+
+| 值 | 模式 | 需要的额外参数 | 说明 |
+|----|------|---------------|------|
+| 0 | 与音色参考音频相同 | 无 | 使用说话人声音的情感（默认） |
+| 1 | 使用情感参考音频 | `emo_audio` | 通过参考音频控制情感 |
+| 2 | 使用情感向量控制 | `emo_vector` | 通过 8 维向量精确控制情感 |
+| 3 | 使用情感描述文本控制 | `emo_text` | 通过文本自动检测情感（实验性） |
+
+#### 情感向量说明 (emo_vector)
+
+8 维情感向量格式: `[喜, 怒, 哀, 惧, 厌恶, 低落, 惊喜, 平静]`
+
+每个维度取值范围 `0.0 - 1.0`。系统会自动应用偏置系数并归一化（总和不超过 0.8）。
+
+| 索引 | 维度 | 说明 |
+|------|------|------|
+| 0 | 喜 (happy) | 快乐 |
+| 1 | 怒 (angry) | 愤怒 |
+| 2 | 哀 (sad) | 悲伤 |
+| 3 | 惧 (afraid) | 恐惧 |
+| 4 | 厌恶 (disgusted) | 厌恶 |
+| 5 | 低落 (melancholic) | 低落 |
+| 6 | 惊喜 (surprised) | 惊喜 |
+| 7 | 平静 (calm) | 平静 |
 
 #### 响应
 
 **成功 (200)**:
 - Content-Type: `audio/wav`
 - 返回生成的音频文件（WAV格式）
+
+**参数错误 (400)**:
+```json
+{
+  "error": "emo_vector 必须是长度为8的JSON数组 [喜,怒,哀,惧,厌恶,低落,惊喜,平静]"
+}
+```
 
 **失败 (500)**:
 ```json
@@ -82,34 +129,64 @@ Authorization: Bearer <your-token>
 
 #### 调用示例
 
-**cURL (无鉴权)**:
+**模式 0 - 与音色参考音频相同（默认）**:
 ```bash
 curl -X POST "http://localhost:8000/api/tts" \
   -F "text=你好，这是语音合成测试" \
   -F "spk_audio=@reference.wav" \
-  -F "emo_alpha=1.0" \
   --output output.wav
 ```
 
-**cURL (带鉴权)**:
+**模式 1 - 使用情感参考音频**:
 ```bash
 curl -X POST "http://localhost:8000/api/tts" \
-  -H "Authorization: Bearer your-secret-token" \
   -F "text=你好，这是语音合成测试" \
   -F "spk_audio=@reference.wav" \
+  -F "emo_mode=1" \
+  -F "emo_audio=@emotion_ref.wav" \
+  -F "emo_alpha=0.8" \
+  --output output.wav
+```
+
+**模式 2 - 使用情感向量控制**:
+```bash
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=你好，这是语音合成测试" \
+  -F "spk_audio=@reference.wav" \
+  -F "emo_mode=2" \
+  -F "emo_vector=[0.8,0,0,0,0,0,0,0]" \
   -F "emo_alpha=1.0" \
   --output output.wav
 ```
 
-**Python (requests - 无鉴权)**:
+**模式 3 - 使用情感描述文本控制**:
+```bash
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=你好，这是语音合成测试" \
+  -F "spk_audio=@reference.wav" \
+  -F "emo_mode=3" \
+  -F "emo_text=开心快乐" \
+  --output output.wav
+```
+
+**Python (requests - 模式 2 情感向量)**:
 ```python
 import requests
+import json
 
 url = "http://localhost:8000/api/tts"
 
+# 8维情感向量: [喜, 怒, 哀, 惧, 厌恶, 低落, 惊喜, 平静]
+emo_vector = [0.8, 0, 0, 0, 0, 0, 0, 0]  # 开心
+
 with open("reference.wav", "rb") as f:
     files = {"spk_audio": f}
-    data = {"text": "你好，这是语音合成测试", "emo_alpha": 1.0}
+    data = {
+        "text": "今天天气真好啊",
+        "emo_mode": 2,
+        "emo_vector": json.dumps(emo_vector),
+        "emo_alpha": 1.0,
+    }
     response = requests.post(url, files=files, data=data)
 
 if response.status_code == 200:
@@ -120,50 +197,58 @@ else:
     print(f"错误: {response.json()}")
 ```
 
-**Python (requests - 带鉴权)**:
+**Python (requests - 模式 1 情感参考音频)**:
 ```python
 import requests
 
 url = "http://localhost:8000/api/tts"
-headers = {"Authorization": "Bearer your-secret-token"}
 
-with open("reference.wav", "rb") as f:
-    files = {"spk_audio": f}
-    data = {"text": "你好，这是语音合成测试", "emo_alpha": 1.0}
-    response = requests.post(url, headers=headers, files=files, data=data)
+with open("reference.wav", "rb") as spk_f, open("emotion.wav", "rb") as emo_f:
+    files = {"spk_audio": spk_f, "emo_audio": emo_f}
+    data = {
+        "text": "今天天气真好啊",
+        "emo_mode": 1,
+        "emo_alpha": 0.8,
+    }
+    response = requests.post(url, files=files, data=data)
 
 if response.status_code == 200:
     with open("output.wav", "wb") as f:
         f.write(response.content)
-    print("合成成功!")
-else:
-    print(f"错误: {response.json()}")
 ```
 
-**Python (httpx)**:
+**Python (httpx - 带鉴权)**:
 ```python
 import httpx
+import json
 
 async def synthesize():
     url = "http://localhost:8000/api/tts"
-    
+    headers = {"Authorization": "Bearer your-secret-token"}
+
     with open("reference.wav", "rb") as f:
         files = {"spk_audio": ("reference.wav", f, "audio/wav")}
-        data = {"text": "你好，这是语音合成测试", "emo_alpha": 1.0}
-        
+        data = {
+            "text": "今天天气真好啊",
+            "emo_mode": 2,
+            "emo_vector": json.dumps([0.8, 0, 0, 0, 0, 0, 0, 0]),
+            "emo_alpha": 1.0,
+        }
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, files=files, data=data)
-            
+            response = await client.post(url, headers=headers, files=files, data=data)
+
     if response.status_code == 200:
         with open("output.wav", "wb") as f:
             f.write(response.content)
 ```
 
-**JavaScript (Fetch)**:
+**JavaScript (Fetch - 情感向量)**:
 ```javascript
 const formData = new FormData();
-formData.append("text", "你好，这是语音合成测试");
-formData.append("spk_audio", fileInput.files[0]);
+formData.append("text", "今天天气真好啊");
+formData.append("spk_audio", spkFileInput.files[0]);
+formData.append("emo_mode", "2");
+formData.append("emo_vector", JSON.stringify([0.8, 0, 0, 0, 0, 0, 0, 0]));
 formData.append("emo_alpha", "1.0");
 
 fetch("http://localhost:8000/api/tts", {

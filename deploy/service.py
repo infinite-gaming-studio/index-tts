@@ -123,10 +123,31 @@ class TTSApp:
         async def tts(
             text: str = Form(...),
             spk_audio: UploadFile = File(...),
-            emo_alpha: float = Form(1.0),
+            emo_mode: int = Form(0, description="情感控制模式: 0=与音色相同, 1=情感参考音频, 2=情感向量, 3=情感文本(实验)"),
+            emo_alpha: float = Form(1.0, description="情感强度系数 (0.0-2.0)"),
+            emo_audio: UploadFile = File(None, description="情感参考音频 (emo_mode=1时使用)"),
+            emo_vector: str = Form(None, description="8维情感向量JSON数组 [喜,怒,哀,惧,厌恶,低落,惊喜,平静], emo_mode=2时使用"),
+            emo_text: str = Form(None, description="情感描述文本, emo_mode=3时使用"),
+            use_random: bool = Form(False, description="情感随机采样 (emo_mode=2时可用)"),
+            do_sample: bool = Form(True),
+            top_p: float = Form(0.8),
+            top_k: int = Form(30),
+            temperature: float = Form(0.8),
+            length_penalty: float = Form(0.0),
+            num_beams: int = Form(3),
+            repetition_penalty: float = Form(10.0),
+            max_mel_tokens: int = Form(1500),
+            max_text_tokens_per_segment: int = Form(120),
             authenticated: bool = Depends(self._verify_token)
         ):
-            """TTS API接口 (需要token鉴权)"""
+            """TTS API接口 (需要token鉴权)
+
+            情感控制模式:
+              0 - 与音色参考音频相同 (默认, 使用说话人的声音情感)
+              1 - 使用情感参考音频 (需上传 emo_audio)
+              2 - 使用情感向量控制 (需传入 emo_vector, 如 [0.8,0,0,0,0,0,0,0] 表示开心)
+              3 - 使用情感描述文本控制 (实验性, 需传入 emo_text)
+            """
             try:
                 if self.tts is None:
                     return JSONResponse(
@@ -134,10 +155,46 @@ class TTSApp:
                         content={"error": "模型未加载"}
                     )
 
-                # 保存参考音频
+                # 保存说话人参考音频
                 with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                     shutil.copyfileobj(spk_audio.file, tmp)
                     spk_path = tmp.name
+
+                # 处理情感参考音频 (mode=1)
+                emo_audio_prompt = None
+                if emo_mode == 1 and emo_audio is not None:
+                    with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                        shutil.copyfileobj(emo_audio.file, tmp)
+                        emo_audio_prompt = tmp.name
+
+                # 处理情感向量 (mode=2)
+                vec = None
+                if emo_mode == 2 and emo_vector is not None:
+                    import json as _json
+                    vec = _json.loads(emo_vector)
+                    if not isinstance(vec, list) or len(vec) != 8:
+                        return JSONResponse(
+                            status_code=400,
+                            content={"error": "emo_vector 必须是长度为8的JSON数组 [喜,怒,哀,惧,厌恶,低落,惊喜,平静]"}
+                        )
+                    vec = self.tts.normalize_emo_vec(vec, apply_bias=True)
+
+                # 处理情感文本 (mode=3)
+                use_emo_text = (emo_mode == 3)
+                if emo_text == "":
+                    emo_text = None
+
+                # 构建生成参数
+                generation_kwargs = {
+                    "do_sample": bool(do_sample),
+                    "top_p": float(top_p),
+                    "top_k": int(top_k) if int(top_k) > 0 else None,
+                    "temperature": float(temperature),
+                    "length_penalty": float(length_penalty),
+                    "num_beams": int(num_beams),
+                    "repetition_penalty": float(repetition_penalty),
+                    "max_mel_tokens": int(max_mel_tokens),
+                }
 
                 # 生成音频
                 output = "/tmp/out.wav"
@@ -145,10 +202,19 @@ class TTSApp:
                     spk_audio_prompt=spk_path,
                     text=text,
                     output_path=output,
+                    emo_audio_prompt=emo_audio_prompt,
                     emo_alpha=emo_alpha,
-                    verbose=False
+                    emo_vector=vec,
+                    use_emo_text=use_emo_text,
+                    emo_text=emo_text,
+                    use_random=use_random,
+                    verbose=False,
+                    max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                    **generation_kwargs
                 )
                 os.unlink(spk_path)
+                if emo_audio_prompt is not None:
+                    os.unlink(emo_audio_prompt)
 
                 return FileResponse(output, media_type="audio/wav")
             except Exception as e:
@@ -176,20 +242,60 @@ class TTSApp:
             """)
 
     def setup_webui(self):
-        """配置WebUI - 使用HTML iframe内嵌base64音频，绕过Gradio文件服务"""
+        """配置WebUI - 完整支持4种情感控制模式"""
         if self.tts is None:
             raise RuntimeError("模型未加载，无法设置WebUI")
 
-        def ui_tts(text, audio, alpha):
+        def ui_tts(text, audio, emo_mode, emo_audio, emo_weight,
+                   vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                   emo_text, emo_random,
+                   do_sample, top_p, top_k, temperature,
+                   length_penalty, num_beams, repetition_penalty, max_mel_tokens,
+                   max_text_tokens_per_segment):
             import time
             import base64
             out = "/tmp/tts_output.wav"
+
+            # 情感参考音频
+            emo_audio_prompt = None
+            if emo_mode == 1 and emo_audio is not None:
+                emo_audio_prompt = emo_audio
+
+            # 情感向量
+            vec = None
+            if emo_mode == 2:
+                vec = [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
+                vec = self.tts.normalize_emo_vec(vec, apply_bias=True)
+
+            # 情感文本
+            use_emo_text = (emo_mode == 3)
+            if emo_text == "":
+                emo_text = None
+
+            kwargs = {
+                "do_sample": bool(do_sample),
+                "top_p": float(top_p),
+                "top_k": int(top_k) if int(top_k) > 0 else None,
+                "temperature": float(temperature),
+                "length_penalty": float(length_penalty),
+                "num_beams": int(num_beams),
+                "repetition_penalty": float(repetition_penalty),
+                "max_mel_tokens": int(max_mel_tokens),
+            }
+
             self.tts.infer(
                 spk_audio_prompt=audio,
                 text=text,
                 output_path=out,
-                emo_alpha=alpha,
-                verbose=False
+                emo_audio_prompt=emo_audio_prompt,
+                emo_alpha=emo_weight,
+                emo_vector=vec,
+                use_emo_text=use_emo_text,
+                emo_text=emo_text,
+                use_random=emo_random,
+                verbose=False,
+                max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                **kwargs
             )
             # 读取并转为base64
             with open(out, 'rb') as f:
@@ -202,18 +308,118 @@ class TTSApp:
             '''
             return html
 
+        def on_mode_change(emo_mode):
+            """根据情感模式切换UI可见性"""
+            if emo_mode == 1:  # 情感参考音频
+                return (gr.update(visible=True),   # emo_audio_group
+                        gr.update(visible=False),   # emo_vector_group
+                        gr.update(visible=False),   # emo_text_group
+                        gr.update(visible=False),   # emo_random_group
+                        gr.update(visible=True))    # emo_weight_group
+            elif emo_mode == 2:  # 情感向量
+                return (gr.update(visible=False),
+                        gr.update(visible=True),
+                        gr.update(visible=False),
+                        gr.update(visible=True),
+                        gr.update(visible=True))
+            elif emo_mode == 3:  # 情感文本
+                return (gr.update(visible=False),
+                        gr.update(visible=False),
+                        gr.update(visible=True),
+                        gr.update(visible=False),
+                        gr.update(visible=True))
+            else:  # 0: 与音色相同
+                return (gr.update(visible=False),
+                        gr.update(visible=False),
+                        gr.update(visible=False),
+                        gr.update(visible=False),
+                        gr.update(visible=False))
+
         with gr.Blocks(title="IndexTTS2") as demo:
-            gr.Markdown("# 🎙️ IndexTTS2")
+            gr.Markdown("# IndexTTS2")
             with gr.Row():
                 with gr.Column():
                     txt = gr.Textbox(label="文本", lines=4)
-                    aud = gr.Audio(label="参考音频", type="filepath")
-                    alpha = gr.Slider(0, 2, value=1, step=0.1, label="情感强度")
+                    aud = gr.Audio(label="音色参考音频", type="filepath")
+
+                    # 情感控制模式
+                    emo_mode = gr.Radio(
+                        choices=["与音色参考音频相同", "使用情感参考音频", "使用情感向量控制", "使用情感描述文本控制(实验)"],
+                        type="index",
+                        value="与音色参考音频相同",
+                        label="情感控制方式"
+                    )
+
+                    # 情感参考音频 (mode=1)
+                    with gr.Group(visible=False) as emo_audio_group:
+                        emo_audio = gr.Audio(label="上传情感参考音频", type="filepath")
+
+                    # 情感随机采样 (mode=2)
+                    with gr.Row(visible=False) as emo_random_group:
+                        emo_random = gr.Checkbox(label="情感随机采样", value=False)
+
+                    # 情感向量 (mode=2)
+                    with gr.Group(visible=False) as emo_vector_group:
+                        with gr.Row():
+                            with gr.Column():
+                                vec1 = gr.Slider(label="喜", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec2 = gr.Slider(label="怒", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec3 = gr.Slider(label="哀", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec4 = gr.Slider(label="惧", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                            with gr.Column():
+                                vec5 = gr.Slider(label="厌恶", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec6 = gr.Slider(label="低落", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec7 = gr.Slider(label="惊喜", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+                                vec8 = gr.Slider(label="平静", minimum=0.0, maximum=1.0, value=0.0, step=0.05)
+
+                    # 情感文本 (mode=3)
+                    with gr.Group(visible=False) as emo_text_group:
+                        emo_text = gr.Textbox(
+                            label="情感描述文本",
+                            placeholder="请输入情绪描述（或留空以自动使用目标文本）",
+                            value=""
+                        )
+
+                    # 情感权重 (mode=1/2/3)
+                    with gr.Group(visible=False) as emo_weight_group:
+                        emo_weight = gr.Slider(label="情感权重", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
+
+                    with gr.Accordion("高级生成参数", open=False):
+                        with gr.Row():
+                            do_sample = gr.Checkbox(label="do_sample", value=True)
+                            temperature = gr.Slider(label="temperature", minimum=0.1, maximum=2.0, value=0.8, step=0.1)
+                        with gr.Row():
+                            top_p = gr.Slider(label="top_p", minimum=0.0, maximum=1.0, value=0.8, step=0.01)
+                            top_k = gr.Slider(label="top_k", minimum=0, maximum=100, value=30, step=1)
+                            num_beams = gr.Slider(label="num_beams", value=3, minimum=1, maximum=10, step=1)
+                        with gr.Row():
+                            repetition_penalty = gr.Number(label="repetition_penalty", value=10.0, minimum=0.1, maximum=20.0, step=0.1)
+                            length_penalty = gr.Number(label="length_penalty", value=0.0, minimum=-2.0, maximum=2.0, step=0.1)
+                        max_mel_tokens = gr.Slider(label="max_mel_tokens", value=1500, minimum=50, maximum=4096, step=10)
+                        max_text_tokens_per_segment = gr.Slider(label="分句最大Token数", value=120, minimum=20, maximum=512, step=2)
+
                     btn = gr.Button("生成", variant="primary")
                 with gr.Column():
                     gr.Markdown("### 生成结果")
                     out = gr.HTML()
-                btn.click(ui_tts, [txt, aud, alpha], out)
+
+                # 模式切换联动
+                emo_mode.change(
+                    on_mode_change,
+                    inputs=[emo_mode],
+                    outputs=[emo_audio_group, emo_vector_group, emo_text_group, emo_random_group, emo_weight_group]
+                )
+
+                btn.click(
+                    ui_tts,
+                    [txt, aud, emo_mode, emo_audio, emo_weight,
+                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                     emo_text, emo_random,
+                     do_sample, top_p, top_k, temperature,
+                     length_penalty, num_beams, repetition_penalty, max_mel_tokens,
+                     max_text_tokens_per_segment],
+                    out
+                )
 
         self.app = gr.mount_gradio_app(self.app, demo, path="/ui")
 
