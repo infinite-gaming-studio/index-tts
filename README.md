@@ -9,6 +9,7 @@
 <a href="README.md" style="font-size: 24px">English</a>
 </div>
 
+
 ## 👉🏻 IndexTTS2 👈🏻
 
 <center><h3>IndexTTS2: A Breakthrough in Emotionally Expressive and Duration-Controlled Auto-Regressive Zero-Shot Text-to-Speech</h3></center>
