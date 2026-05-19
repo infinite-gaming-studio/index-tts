@@ -64,6 +64,8 @@ Authorization: Bearer <your-token>
 | `emo_vector` | string | 否 | - | 8维情感向量 JSON 数组（`emo_mode=2` 时使用） |
 | `emo_text` | string | 否 | - | 情感描述文本（`emo_mode=3` 时使用） |
 | `use_random` | bool | 否 | false | 情感随机采样（`emo_mode=2` 时可用） |
+| `speed` | float | 否 | 1.0 | 语速调节系数（0.5 - 2.0，大于1.0加速，小于1.0减速） |
+| `target_length_ms` | int | 否 | - | 目标时长毫秒数（若指定，则精确拉伸/压缩音频到该时长） |
 | `do_sample` | bool | 否 | true | 是否进行采样 |
 | `top_p` | float | 否 | 0.8 | Top-p 采样参数 |
 | `top_k` | int | 否 | 30 | Top-k 采样参数 |
@@ -137,6 +139,23 @@ curl -X POST "http://localhost:8000/api/tts" \
   --output output.wav
 ```
 
+**语速与时长控制示例**:
+```bash
+# 将语速设为 1.3 倍
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=你好，这是语音合成测试" \
+  -F "spk_audio=@reference.wav" \
+  -F "speed=1.3" \
+  --output output.wav
+
+# 将音频绝对时长固定为 4500 毫秒（4.5秒）
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=你好，这是语音合成测试" \
+  -F "spk_audio=@reference.wav" \
+  -F "target_length_ms=4500" \
+  --output output.wav
+```
+
 **模式 1 - 使用情感参考音频**:
 ```bash
 curl -X POST "http://localhost:8000/api/tts" \
@@ -186,6 +205,8 @@ with open("reference.wav", "rb") as f:
         "emo_mode": 2,
         "emo_vector": json.dumps(emo_vector),
         "emo_alpha": 1.0,
+        "speed": 1.2,                 # 👈 语速设为1.2倍
+        "target_length_ms": 3000,     # 👈 目标时长3000毫秒（可选，设为None或不传则不启用）
     }
     response = requests.post(url, files=files, data=data)
 

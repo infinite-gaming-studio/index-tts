@@ -129,6 +129,8 @@ class TTSApp:
             emo_vector: str = Form(None, description="8维情感向量JSON数组 [喜,怒,哀,惧,厌恶,低落,惊喜,平静], emo_mode=2时使用"),
             emo_text: str = Form(None, description="情感描述文本, emo_mode=3时使用"),
             use_random: bool = Form(False, description="情感随机采样 (emo_mode=2时可用)"),
+            speed: float = Form(1.0, description="语速调节系数 (0.5-2.0, 默认1.0)"),
+            target_length_ms: int = Form(None, description="绝对目标时长毫秒数 (可选)"),
             do_sample: bool = Form(True),
             top_p: float = Form(0.8),
             top_k: int = Form(30),
@@ -198,6 +200,10 @@ class TTSApp:
 
                 # 生成音频
                 output = "/tmp/out.wav"
+                target_len_val = None
+                if target_length_ms is not None and target_length_ms > 0:
+                    target_len_val = int(target_length_ms)
+
                 self.tts.infer(
                     spk_audio_prompt=spk_path,
                     text=text,
@@ -210,6 +216,8 @@ class TTSApp:
                     use_random=use_random,
                     verbose=False,
                     max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                    speed=float(speed),
+                    target_length_ms=target_len_val,
                     **generation_kwargs
                 )
                 os.unlink(spk_path)
@@ -249,6 +257,7 @@ class TTSApp:
         def ui_tts(text, audio, emo_mode, emo_audio, emo_weight,
                    vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                    emo_text, emo_random,
+                   speed, target_length_ms,
                    do_sample, top_p, top_k, temperature,
                    length_penalty, num_beams, repetition_penalty, max_mel_tokens,
                    max_text_tokens_per_segment):
@@ -283,6 +292,10 @@ class TTSApp:
                 "max_mel_tokens": int(max_mel_tokens),
             }
 
+            target_len_val = None
+            if target_length_ms is not None and target_length_ms > 0:
+                target_len_val = int(target_length_ms)
+
             self.tts.infer(
                 spk_audio_prompt=audio,
                 text=text,
@@ -295,6 +308,8 @@ class TTSApp:
                 use_random=emo_random,
                 verbose=False,
                 max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                speed=float(speed),
+                target_length_ms=target_len_val,
                 **kwargs
             )
             # 读取并转为base64
@@ -386,6 +401,9 @@ class TTSApp:
 
                     with gr.Accordion("高级生成参数", open=False):
                         with gr.Row():
+                            speed = gr.Slider(label="语速 (Speed)", minimum=0.5, maximum=2.0, value=1.0, step=0.05)
+                            target_length_ms = gr.Number(label="目标时长毫秒 (Target Length in ms)", value=0, precision=0)
+                        with gr.Row():
                             do_sample = gr.Checkbox(label="do_sample", value=True)
                             temperature = gr.Slider(label="temperature", minimum=0.1, maximum=2.0, value=0.8, step=0.1)
                         with gr.Row():
@@ -415,6 +433,7 @@ class TTSApp:
                     [txt, aud, emo_mode, emo_audio, emo_weight,
                      vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                      emo_text, emo_random,
+                     speed, target_length_ms,
                      do_sample, top_p, top_k, temperature,
                      length_penalty, num_beams, repetition_penalty, max_mel_tokens,
                      max_text_tokens_per_segment],

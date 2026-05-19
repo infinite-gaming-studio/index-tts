@@ -129,6 +129,8 @@ def gen_single(emo_control_method,prompt, text,
                vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                emo_text,emo_random,
                max_text_tokens_per_segment=120,
+               speed=1.0,
+               target_length_ms=0,
                 *args, progress=gr.Progress()):
     output_path = None
     if not output_path:
@@ -166,7 +168,11 @@ def gen_single(emo_control_method,prompt, text,
         # erase empty emotion descriptions; `infer()` will then automatically use the main prompt
         emo_text = None
 
-    print(f"Emo control mode:{emo_control_method},weight:{emo_weight},vec:{vec}")
+    target_len_val = None
+    if target_length_ms is not None and target_length_ms > 0:
+        target_len_val = int(target_length_ms)
+
+    print(f"Emo control mode:{emo_control_method},weight:{emo_weight},vec:{vec},speed:{speed},target_length_ms:{target_len_val}")
     output = tts.infer(spk_audio_prompt=prompt, text=text,
                        output_path=output_path,
                        emo_audio_prompt=emo_ref_path, emo_alpha=emo_weight,
@@ -174,6 +180,8 @@ def gen_single(emo_control_method,prompt, text,
                        use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
                        verbose=cmd_args.verbose,
                        max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                       speed=float(speed),
+                       target_length_ms=target_len_val,
                        **kwargs)
     return gr.update(value=output,visible=True)
 
@@ -304,6 +312,10 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                     #     typical_sampling = gr.Checkbox(label="typical_sampling", value=False, info="不建议使用")
                     #     typical_mass = gr.Slider(label="typical_mass", value=0.9, minimum=0.0, maximum=1.0, step=0.1)
                 with gr.Column(scale=2):
+                    gr.Markdown(f'**{i18n("语速与时长设置")}**')
+                    with gr.Row():
+                        speed = gr.Slider(label=i18n("语速 (Speed)"), minimum=0.5, maximum=2.0, value=1.0, step=0.05, info=i18n("数值大于1.0加速，小于1.0减速"))
+                        target_length_ms = gr.Number(label=i18n("目标时长毫秒 (Target Length in ms)"), value=0, precision=0, info=i18n("指定精确的音频时长（毫秒），设为0代表不启用"))
                     gr.Markdown(f'**{i18n("分句设置")}** _{i18n("参数会影响音频质量和生成速度")}_')
                     with gr.Row():
                         initial_value = max(20, min(tts.cfg.gpt.max_text_tokens, cmd_args.gui_seg_tokens))
@@ -546,6 +558,8 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                             vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                              emo_text,emo_random,
                              max_text_tokens_per_segment,
+                             speed,
+                             target_length_ms,
                              *advanced_params,
                      ],
                      outputs=[output_audio])
