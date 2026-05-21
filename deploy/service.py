@@ -147,7 +147,7 @@ class TTSApp:
             情感控制模式:
               0 - 与音色参考音频相同 (默认, 使用说话人的声音情感)
               1 - 使用情感参考音频 (需上传 emo_audio)
-              2 - 使用情感向量控制 (需传入 emo_vector, 如 [0.8,0,0,0,0,0,0,0] 表示开心)
+              2 - 使用情感向量控制 (需传入 emo_vector, 如 [0.8,0,0,0,0,0,0] 表示开心)
               3 - 使用情感描述文本控制 (实验性, 需传入 emo_text)
             """
             try:
@@ -156,6 +156,20 @@ class TTSApp:
                         status_code=503,
                         content={"error": "模型未加载"}
                     )
+
+                print(f"\n{'='*60}", flush=True)
+                print(f"[DEBUG] TTS API 请求参数:", flush=True)
+                print(f"  text: {text}", flush=True)
+                print(f"  emo_mode: {emo_mode}", flush=True)
+                print(f"  emo_alpha: {emo_alpha}", flush=True)
+                print(f"  emo_vector (raw): {emo_vector}", flush=True)
+                print(f"  emo_text: {emo_text}", flush=True)
+                print(f"  use_random: {use_random}", flush=True)
+                print(f"  speed: {speed}", flush=True)
+                print(f"  target_length_ms: {target_length_ms}", flush=True)
+                print(f"  spk_audio filename: {spk_audio.filename}", flush=True)
+                print(f"  emo_audio: {emo_audio.filename if emo_audio else None}", flush=True)
+                print(f"{'='*60}", flush=True)
 
                 # 保存说话人参考音频
                 with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
@@ -179,12 +193,16 @@ class TTSApp:
                             status_code=400,
                             content={"error": "emo_vector 必须是长度为8的JSON数组 [喜,怒,哀,惧,厌恶,低落,惊喜,平静]"}
                         )
+                    print(f"[DEBUG] 情感向量 (解析后): {vec}", flush=True)
                     vec = self.tts.normalize_emo_vec(vec, apply_bias=True)
+                    print(f"[DEBUG] 情感向量 (normalize后): {vec}", flush=True)
 
                 # 处理情感文本 (mode=3)
                 use_emo_text = (emo_mode == 3)
                 if emo_text == "":
                     emo_text = None
+                if use_emo_text:
+                    print(f"[DEBUG] 情感文本模式, emo_text={emo_text}", flush=True)
 
                 # 构建生成参数
                 generation_kwargs = {
@@ -203,6 +221,21 @@ class TTSApp:
                 target_len_val = None
                 if target_length_ms is not None and target_length_ms > 0:
                     target_len_val = int(target_length_ms)
+
+                print(f"\n[DEBUG] 调用 infer 参数:", flush=True)
+                print(f"  spk_audio_prompt: {spk_path}", flush=True)
+                print(f"  text: {text}", flush=True)
+                print(f"  output_path: {output}", flush=True)
+                print(f"  emo_audio_prompt: {emo_audio_prompt}", flush=True)
+                print(f"  emo_alpha: {emo_alpha}", flush=True)
+                print(f"  emo_vector: {vec}", flush=True)
+                print(f"  use_emo_text: {use_emo_text}", flush=True)
+                print(f"  emo_text: {emo_text}", flush=True)
+                print(f"  use_random: {use_random}", flush=True)
+                print(f"  speed: {speed}", flush=True)
+                print(f"  target_length_ms: {target_len_val}", flush=True)
+                print(f"  generation_kwargs: {generation_kwargs}", flush=True)
+                print(f"  max_text_tokens_per_segment: {int(max_text_tokens_per_segment)}", flush=True)
 
                 self.tts.infer(
                     spk_audio_prompt=spk_path,
@@ -224,6 +257,7 @@ class TTSApp:
                 if emo_audio_prompt is not None:
                     os.unlink(emo_audio_prompt)
 
+                print(f"[DEBUG] 音频生成完成: {output}", flush=True)
                 return FileResponse(output, media_type="audio/wav")
             except Exception as e:
                 return JSONResponse(
@@ -255,15 +289,27 @@ class TTSApp:
             raise RuntimeError("模型未加载，无法设置WebUI")
 
         def ui_tts(text, audio, emo_mode, emo_audio, emo_weight,
-                   vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
-                   emo_text, emo_random,
-                   speed, target_length_ms,
-                   do_sample, top_p, top_k, temperature,
-                   length_penalty, num_beams, repetition_penalty, max_mel_tokens,
-                   max_text_tokens_per_segment):
+            vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+            emo_text, emo_random,
+            speed, target_length_ms,
+            do_sample, top_p, top_k, temperature,
+            length_penalty, num_beams, repetition_penalty, max_mel_tokens,
+            max_text_tokens_per_segment):
             import time
             import base64
             out = "/tmp/tts_output.wav"
+
+            print(f"\n{'='*60}", flush=True)
+            print(f"[DEBUG] WebUI TTS 请求参数:", flush=True)
+            print(f"  text: {text}", flush=True)
+            print(f"  audio: {audio}", flush=True)
+            print(f"  emo_mode: {emo_mode}", flush=True)
+            print(f"  emo_audio: {emo_audio}", flush=True)
+            print(f"  emo_weight: {emo_weight}", flush=True)
+            print(f"  emo_text: {emo_text}", flush=True)
+            print(f"  emo_random: {emo_random}", flush=True)
+            print(f"  speed: {speed}", flush=True)
+            print(f"  target_length_ms: {target_length_ms}", flush=True)
 
             # 情感参考音频
             emo_audio_prompt = None
@@ -274,12 +320,16 @@ class TTSApp:
             vec = None
             if emo_mode == 2:
                 vec = [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
+                print(f"[DEBUG] 情感向量 (原始): {vec}", flush=True)
                 vec = self.tts.normalize_emo_vec(vec, apply_bias=True)
+                print(f"[DEBUG] 情感向量 (normalize后): {vec}", flush=True)
 
             # 情感文本
             use_emo_text = (emo_mode == 3)
             if emo_text == "":
                 emo_text = None
+            if use_emo_text:
+                print(f"[DEBUG] 情感文本模式, emo_text={emo_text}", flush=True)
 
             kwargs = {
                 "do_sample": bool(do_sample),
@@ -295,6 +345,20 @@ class TTSApp:
             target_len_val = None
             if target_length_ms is not None and target_length_ms > 0:
                 target_len_val = int(target_length_ms)
+
+            print(f"\n[DEBUG] WebUI 调用 infer 参数:", flush=True)
+            print(f"  spk_audio_prompt: {audio}", flush=True)
+            print(f"  text: {text}", flush=True)
+            print(f"  output_path: {out}", flush=True)
+            print(f"  emo_audio_prompt: {emo_audio_prompt}", flush=True)
+            print(f"  emo_alpha: {emo_weight}", flush=True)
+            print(f"  emo_vector: {vec}", flush=True)
+            print(f"  use_emo_text: {use_emo_text}", flush=True)
+            print(f"  emo_text: {emo_text}", flush=True)
+            print(f"  use_random: {emo_random}", flush=True)
+            print(f"  speed: {speed}", flush=True)
+            print(f"  target_length_ms: {target_len_val}", flush=True)
+            print(f"  kwargs: {kwargs}", flush=True)
 
             self.tts.infer(
                 spk_audio_prompt=audio,
@@ -312,6 +376,7 @@ class TTSApp:
                 target_length_ms=target_len_val,
                 **kwargs
             )
+            print(f"[DEBUG] WebUI 音频生成完成: {out}", flush=True)
             # 读取并转为base64
             with open(out, 'rb') as f:
                 audio_bytes = f.read()
