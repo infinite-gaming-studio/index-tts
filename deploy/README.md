@@ -12,7 +12,9 @@
 deploy/
 ├── scripts/
 │   ├── setup.sh   # 一键部署: 克隆仓库 → 装依赖 → 下载 IndexTTS-2.5 权重
-│   └── serve.sh   # 启动 WebUI + 公网隧道 (Cloudflare 优先, ngrok 回退)
+│   └── serve.sh   # 启动服务 + 公网隧道 (Cloudflare 优先, ngrok 回退)
+├── service.py     # IndexTTS-2.5 API 服务 (FastAPI, 底层 2.5 引擎, 见 API.md)
+├── API.md         # API 接口文档 (4 种情感模式 + 多语言 + 语速控制)
 ├── colab/
 │   └── IndexTTS-2.5_Colab.ipynb    # Colab 3 步部署
 ├── kaggle/
@@ -49,7 +51,9 @@ MODEL_SOURCE=modelscope bash deploy/scripts/setup.sh
 ### 第 2 步：启动服务 + 公网隧道
 
 ```bash
-bash deploy/scripts/serve.sh
+bash deploy/scripts/serve.sh                    # 默认启动 WebUI
+SERVICE=api bash deploy/scripts/serve.sh        # 启动 API 服务 (FastAPI, /docs)
+SERVICE=both bash deploy/scripts/serve.sh       # API + WebUI 一起
 ```
 
 - 默认 **Cloudflare 快速隧道**（免注册、免 token），就绪后打印
@@ -57,13 +61,19 @@ bash deploy/scripts/serve.sh
 - 备选 **ngrok**：`TUNNEL=ngrok NGROK_TOKEN=xxx bash deploy/scripts/serve.sh`
 - 仅本机：`TUNNEL=none bash deploy/scripts/serve.sh`
 
+API 服务说明见 **[API.md](API.md)**：`POST /api/tts`（4 种情感模式 + 多语言
+ZH/EN/JA/ES/AR + 语速控制 duration_factor + base64 JSON 响应）、`GET /api/health`、
+Swagger `/docs`、可选 Bearer 鉴权（`INDEXTTS_API_TOKEN`）。
+
 可选环境变量：
 
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
+| `SERVICE` | `webui` / `api` / `both` | webui |
 | `TUNNEL` | `cf` / `ngrok` / `none` | cf |
-| `PORT` | 本地端口 | 7860 |
+| `PORT` | 本地端口（WebUI 7860 / API 8000） | 按服务类型 |
 | `WEBUI_ARGS` | 追加 webui 参数（如 `--fp16`） | 空 |
+| `API_ARGS` | 追加 API 参数（如 `--qwen-emo --deepspeed`） | 空 |
 | `NGROK_TOKEN` | ngrok authtoken（TUNNEL=ngrok 时建议） | 空 |
 
 ### 第 3 步（可选）：命令行合成验证
