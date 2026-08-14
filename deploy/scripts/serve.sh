@@ -34,7 +34,8 @@ cd "${WORK_DIR}/${REPO_DIR}"
 
 echo "==> [1/2] 后台启动 WebUI (http://127.0.0.1:${PORT})"
 # webui.py 默认 IndexTTS-2.5, 权重目录 ./checkpoints
-nohup uv run webui.py --host 0.0.0.0 --port "${PORT}" ${WEBUI_ARGS} > webui.log 2>&1 &
+# 注意: 必须 --all-extras, 否则 uv run 会按默认特性集重新同步, 剪掉 gradio(webui extra)
+nohup uv run --all-extras webui.py --host 0.0.0.0 --port "${PORT}" ${WEBUI_ARGS} > webui.log 2>&1 &
 
 echo "==> 等待 WebUI 就绪 (最多 300 秒)..."
 ready=""
