@@ -18,6 +18,7 @@
 #   API_ARGS    追加给 deploy/service.py 的参数 (如 "--qwen-emo --deepspeed")
 #   NGROK_TOKEN ngrok authtoken (TUNNEL=ngrok 时建议设置, 否则免费额度受限)
 #   REPO_DIR    本地目录名 (默认 index-tts)
+#   KEEPALIVE   1 (默认) 后台心跳防空闲断连 | 0 关闭
 # =============================================================================
 set -euo pipefail
 
@@ -27,6 +28,7 @@ PORT="${PORT:-}"
 WEBUI_ARGS="${WEBUI_ARGS:-}"
 API_ARGS="${API_ARGS:-}"
 REPO_DIR="${REPO_DIR:-index-tts}"
+KEEPALIVE="${KEEPALIVE:-1}"
 
 # ---- 环境探测 (Colab / Kaggle / 本地) ----
 if [ -d "/content" ]; then
@@ -82,6 +84,20 @@ if [ -z "${ready}" ]; then
   exit 1
 fi
 echo "==> 服务已就绪: http://127.0.0.1:${PORT}"
+echo "==> 最近日志 (完整日志: tail -f ${LOG_FILE}):"
+tail -n 20 "${LOG_FILE}" 2>/dev/null || true
+
+# ---- 心跳保活: 周期性请求本地端口, 防止 Colab/Kaggle 空闲断连 ----
+if [ "${KEEPALIVE}" = "1" ]; then
+  (
+    while true; do
+      curl -sf -o /dev/null "http://127.0.0.1:${PORT}" && echo "[$(date '+%H:%M:%S')] keepalive ping ok" >> keepalive.log || true
+      sleep 120
+    done
+  ) &
+  KEEPALIVE_PID=$!
+  echo "==> 心跳已启动 (PID ${KEEPALIVE_PID}, 每 120s ping 一次, KEEPALIVE=0 可关闭)"
+fi
 
 echo "==> [2/2] 建立公网隧道 (方式: ${TUNNEL})"
 case "${TUNNEL}" in
@@ -107,7 +123,7 @@ case "${TUNNEL}" in
   none)
     echo "==> 未启用隧道, 仅本机可访问: http://127.0.0.1:${PORT}"
     echo "    如需公网访问, 重启时加 TUNNEL=cf 或 TUNNEL=ngrok"
-    tail -f webui.log
+    tail -f "${LOG_FILE}"
     ;;
   *)
     echo "!! 未知 TUNNEL=${TUNNEL} (可选 cf|ngrok|none)" >&2
