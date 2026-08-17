@@ -12,7 +12,7 @@
 #
 # 环境变量:
 #   SERVICE     webui (默认) | api | both
-#   TUNNEL      cf (默认, Cloudflare 免注册) | ngrok | none
+#   TUNNEL      ngrok (默认) | cf (Cloudflare 免注册) | none
 #   PORT        本地端口 (WebUI 默认 7860; API 默认 8000)
 #   WEBUI_ARGS  追加给 webui.py 的参数 (如 "--fp16 --deepspeed")
 #   API_ARGS    追加给 deploy/service.py 的参数 (如 "--qwen-emo --deepspeed")
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 SERVICE="${SERVICE:-webui}"
-TUNNEL="${TUNNEL:-cf}"
+TUNNEL="${TUNNEL:-ngrok}"
 PORT="${PORT:-}"
 WEBUI_ARGS="${WEBUI_ARGS:-}"
 API_ARGS="${API_ARGS:-}"
