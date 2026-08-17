@@ -57,9 +57,9 @@ SERVICE=api bash deploy/scripts/serve.sh        # 启动 API 服务 (FastAPI, /d
 SERVICE=both bash deploy/scripts/serve.sh       # API + WebUI 一起
 ```
 
-- 默认 **Cloudflare 快速隧道**（免注册、免 token），就绪后打印
-  `https://xxx.trycloudflare.com` 公网链接，浏览器打开即用。
-- 备选 **ngrok**：`TUNNEL=ngrok NGROK_TOKEN=xxx bash deploy/scripts/serve.sh`
+- 默认 **ngrok 隧道**（需 `NGROK_TOKEN`，免费注册 https://dashboard.ngrok.com 获取
+  authtoken），就绪后打印 `https://xxx.ngrok-free.app` 公网链接，浏览器打开即用。
+- 免注册备选 **Cloudflare**：`TUNNEL=cf bash deploy/scripts/serve.sh`
 - 仅本机：`TUNNEL=none bash deploy/scripts/serve.sh`
 
 API 服务说明见 **[API.md](API.md)**：`POST /api/tts`（4 种情感模式 + 多语言
@@ -72,12 +72,12 @@ Swagger `/docs`。API 鉴权默认开启：固定 Key `indextts-fixed-key-2026`�
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
 | `SERVICE` | `webui` / `api` / `both` | webui |
-| `TUNNEL` | `cf` / `ngrok` / `none` | cf |
+| `TUNNEL` | `cf` / `ngrok` / `none` | ngrok |
 | `PORT` | 本地端口（WebUI 7860 / API 8000） | 按服务类型 |
 | `WEBUI_ARGS` | 追加 webui 参数（如 `--fp16`） | 空 |
 | `API_ARGS` | 追加 API 参数（如 `--qwen-emo --deepspeed`） | 空 |
 | `INDEXTTS_API_TOKEN` | API 鉴权 Key；默认固定 `indextts-fixed-key-2026`，可自定义，置空 `""` 关闭 | 固定 `indextts-fixed-key-2026` |
-| `NGROK_TOKEN` | ngrok authtoken（TUNNEL=ngrok 时建议） | 空 |
+| `NGROK_TOKEN` | ngrok authtoken（TUNNEL=ngrok 时必须，免费注册获取） | 空 |
 | `KEEPALIVE` | 心跳保活 1 开 / 0 关 | 1 |
 
 ### 第 3 步：查看日志（排查问题）
@@ -136,7 +136,7 @@ tts.infer(
 
 | 平台 | Notebook | 注意事项 |
 | --- | --- | --- |
-| Colab | `colab/IndexTTS-2.5_Colab.ipynb` | 运行时选 GPU (T4)；WebUI 用 CF 隧道 |
+| Colab | `colab/IndexTTS-2.5_Colab.ipynb` | 运行时选 GPU (T4)；默认 ngrok 隧道 |
 | Kaggle | `kaggle/IndexTTS-2.5_Kaggle.ipynb` | Settings: Accelerator=GPU + Internet=ON |
 
 notebook 内部即调用 `deploy/scripts/setup.sh` 与 `serve.sh`，克隆地址已指向本仓库。
@@ -147,5 +147,5 @@ notebook 内部即调用 `deploy/scripts/setup.sh` 与 `serve.sh`，克隆地址
   `WEBUI_ARGS="--fp16" bash deploy/scripts/serve.sh`。
 - **HF 下载慢/超时**：`export HF_ENDPOINT="https://hf-mirror.com"` 或
   `MODEL_SOURCE=modelscope`。
-- **CF 隧道不稳定**：换 ngrok（需注册 token）或 `TUNNEL=none` 本地使用。
+- **ngrok 隧道不稳定**：换免注册的 Cloudflare（`TUNNEL=cf`）或 `TUNNEL=none` 本地使用。
 - **示例音频缺失**：运行 `ensure_examples_available()`（见上）。

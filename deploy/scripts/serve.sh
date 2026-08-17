@@ -3,7 +3,7 @@
 # IndexTTS-2.5 服务启动脚本 (Colab / Kaggle / 本地 Linux 通用)
 #
 # 用法:
-#   bash serve.sh                          # 启动 WebUI + Cloudflare 隧道
+#   bash serve.sh                          # 启动 WebUI + ngrok 隧道
 #   SERVICE=api bash serve.sh              # 启动 API 服务 (FastAPI, 端口 8000)
 #   SERVICE=both bash serve.sh             # 同时启动 API + WebUI
 #   TUNNEL=ngrok bash serve.sh             # 改用 ngrok 隧道
@@ -16,7 +16,7 @@
 #   PORT        本地端口 (WebUI 默认 7860; API 默认 8000)
 #   WEBUI_ARGS  追加给 webui.py 的参数 (如 "--fp16 --deepspeed")
 #   API_ARGS    追加给 deploy/service.py 的参数 (如 "--qwen-emo --deepspeed")
-#   NGROK_TOKEN ngrok authtoken (TUNNEL=ngrok 时建议设置, 否则免费额度受限)
+#   NGROK_TOKEN ngrok authtoken (TUNNEL=ngrok 时必须设置, 免费注册 https://dashboard.ngrok.com)
 #   INDEXTTS_API_TOKEN API 鉴权 Key; 默认固定(见启动日志), 可自定义或置空 "" 关闭
 #   REPO_DIR    本地目录名 (默认 index-tts)
 #   KEEPALIVE   1 (默认) 后台心跳防空闲断连 | 0 关闭
@@ -133,17 +133,22 @@ case "${TUNNEL}" in
       }
       chmod +x ./ngrok
     fi
-    if [ -n "${NGROK_TOKEN:-}" ]; then
-      echo "==> 配置 ngrok authtoken..."
-      ./ngrok config add-authtoken "${NGROK_TOKEN}" 2>&1 | tail -3
-    else
-      echo "!! 未设置 NGROK_TOKEN，免费版隧道必须配置 authtoken" >&2
+    if [ -z "${NGROK_TOKEN:-}" ]; then
+      # ngrok 免费版必须配置 authtoken; 缺失时直接失败并给出明确指引,
+      # 避免启动后静默无 URL, notebook 空等 10 分钟
+      echo "!! TUNNEL=ngrok 必须设置 NGROK_TOKEN (免费注册: https://dashboard.ngrok.com)" >&2
+      echo "   获取 authtoken 后: %env NGROK_TOKEN=你的authtoken 再重跑步骤 2" >&2
+      echo "   或改用免注册隧道:  %env TUNNEL=cf" >&2
+      exit 1
     fi
+    echo "==> 配置 ngrok authtoken..."
+    ./ngrok config add-authtoken "${NGROK_TOKEN}" 2>&1 | tail -3
     echo "==> 启动 ngrok 隧道 (http://127.0.0.1:${PORT})..."
     # 必须 exec 前台运行：输出直接进 serve.sh 的 stdout（serve_console.log），
     # notebook 轮询 serve_console.log 才能提取到 Public URL。
     # 不能重定向到 ngrok.log——notebook 看不到那个文件，会报「获取不到公网 URL」。
-    exec ./ngrok http "${PORT}" --log=stdout
+    # --log=stdout --log-level=info: 确保含公网 URL 的 "started tunnel" 日志写入 stdout
+    exec ./ngrok http "${PORT}" --log=stdout --log-level=info
     ;;
   none)
     echo "==> 未启用隧道, 仅本机可访问: http://127.0.0.1:${PORT}"
