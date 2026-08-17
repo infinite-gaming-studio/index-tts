@@ -17,6 +17,7 @@
 #   WEBUI_ARGS  追加给 webui.py 的参数 (如 "--fp16 --deepspeed")
 #   API_ARGS    追加给 deploy/service.py 的参数 (如 "--qwen-emo --deepspeed")
 #   NGROK_TOKEN ngrok authtoken (TUNNEL=ngrok 时建议设置, 否则免费额度受限)
+#   INDEXTTS_API_TOKEN API 鉴权 Key; 默认固定(见启动日志), 可自定义或置空 "" 关闭
 #   REPO_DIR    本地目录名 (默认 index-tts)
 #   KEEPALIVE   1 (默认) 后台心跳防空闲断连 | 0 关闭
 # =============================================================================
@@ -84,6 +85,12 @@ if [ -z "${ready}" ]; then
   exit 1
 fi
 echo "==> 服务已就绪: http://127.0.0.1:${PORT}"
+# 从日志提取 API Key (service.py 启动横幅中打印), 方便直接复制调用
+API_KEY=$(grep -m1 "API Key:" "${LOG_FILE}" | awk '{print $NF}')
+if [ -n "${API_KEY}" ]; then
+  echo "==> 🔑 API Key: ${API_KEY}"
+  echo "    调用示例: curl -H \"Authorization: Bearer ${API_KEY}\" -F text='你好' -F spk_audio=@ref.wav http://127.0.0.1:${PORT}/api/tts"
+fi
 echo "==> 最近日志 (完整日志: tail -f ${LOG_FILE}):"
 tail -n 20 "${LOG_FILE}" 2>/dev/null || true
 

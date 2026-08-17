@@ -64,7 +64,8 @@ SERVICE=both bash deploy/scripts/serve.sh       # API + WebUI 一起
 
 API 服务说明见 **[API.md](API.md)**：`POST /api/tts`（4 种情感模式 + 多语言
 ZH/EN/JA/ES/AR + 语速控制 duration_factor + base64 JSON 响应）、`GET /api/health`、
-Swagger `/docs`、可选 Bearer 鉴权（`INDEXTTS_API_TOKEN`）。
+Swagger `/docs`。API 鉴权默认开启：固定 Key `indextts-fixed-key-2026`（打印在启动日志），
+`INDEXTTS_API_TOKEN` 可自定义 Key 或置空 `""` 关闭。
 
 可选环境变量：
 
@@ -75,6 +76,7 @@ Swagger `/docs`、可选 Bearer 鉴权（`INDEXTTS_API_TOKEN`）。
 | `PORT` | 本地端口（WebUI 7860 / API 8000） | 按服务类型 |
 | `WEBUI_ARGS` | 追加 webui 参数（如 `--fp16`） | 空 |
 | `API_ARGS` | 追加 API 参数（如 `--qwen-emo --deepspeed`） | 空 |
+| `INDEXTTS_API_TOKEN` | API 鉴权 Key；默认固定 `indextts-fixed-key-2026`，可自定义，置空 `""` 关闭 | 固定 `indextts-fixed-key-2026` |
 | `NGROK_TOKEN` | ngrok authtoken（TUNNEL=ngrok 时建议） | 空 |
 | `KEEPALIVE` | 心跳保活 1 开 / 0 关 | 1 |
 

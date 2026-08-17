@@ -53,6 +53,7 @@ except ImportError:
 from indextts.infer_v2_5 import IndexTTS2
 
 DEFAULT_LANGS = ("ZH", "EN", "JA", "ES", "AR", "ZHEN")
+DEFAULT_API_TOKEN = "indextts-fixed-key-2026"  # 默认固定鉴权 Key (见启动日志)
 
 
 class TTSConfig:
@@ -71,7 +72,17 @@ class TTSConfig:
         self.use_accel = False
         self.use_torch_compile = False
         self.use_qwen_emo = False
-        self.api_token = os.environ.get("INDEXTTS_API_TOKEN")
+        # 鉴权: 默认固定 Key (方便直接调用, 见启动日志);
+        #   覆盖:  export INDEXTTS_API_TOKEN=my-key  (自定义/更安全)
+        #   关闭:  export INDEXTTS_API_TOKEN=""       (仅建议内网/本机)
+        # 注意: 本仓库公开时默认 Key 同样公开, 生产环境请用 env 覆盖
+        raw_token = os.environ.get("INDEXTTS_API_TOKEN")
+        if raw_token is None:
+            self.api_token = DEFAULT_API_TOKEN
+        elif raw_token == "":
+            self.api_token = None
+        else:
+            self.api_token = raw_token
         self.default_lang = "ZH"
 
     def _get_repo_dir(self):
@@ -402,6 +413,10 @@ class TTSApp:
             print(f"  WebUI: /ui", flush=True)
         if self.config.api_token:
             print(f"  鉴权: Bearer token 已启用", flush=True)
+            print(f"  🔑 API Key: {self.config.api_token}", flush=True)
+            print(f"  curl 示例: curl -H \"Authorization: Bearer {self.config.api_token}\" -F text='你好' -F spk_audio=@ref.wav http://127.0.0.1:{self.config.port}/api/tts", flush=True)
+        else:
+            print(f"  鉴权: 已关闭 (INDEXTTS_API_TOKEN 显式置空)", flush=True)
         print("=" * 60 + "\n", flush=True)
         uvicorn.run(self.app, host="0.0.0.0", port=self.config.port)
 

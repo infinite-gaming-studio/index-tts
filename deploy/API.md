@@ -19,8 +19,15 @@ uv run --all-extras python deploy/service.py --mode api --port 8000
 # API + WebUI（/ui）
 uv run --all-extras python deploy/service.py --mode both --port 8000
 
-# 启用鉴权
+# 鉴权说明: 默认固定 Key: indextts-fixed-key-2026 (见启动日志, 直接使用)
+uv run --all-extras python deploy/service.py --mode api
+
+# 自定义 Key (更安全, 仓库公开时建议设置)
 export INDEXTTS_API_TOKEN="your-secret-token"
+uv run --all-extras python deploy/service.py --mode api
+
+# 显式关闭鉴权 (仅建议内网/本机使用)
+export INDEXTTS_API_TOKEN=""
 uv run --all-extras python deploy/service.py --mode api
 ```
 
@@ -59,7 +66,17 @@ uv run --all-extras python deploy/service.py --mode api
 
 #### 鉴权
 
-如果设置了 `INDEXTTS_API_TOKEN` 环境变量，需要在请求头中携带 Token：
+**默认开启**：未设置 `INDEXTTS_API_TOKEN` 时，使用默认固定 Key：
+
+```
+Authorization: Bearer indextts-fixed-key-2026
+```
+
+- 自定义 Key：`export INDEXTTS_API_TOKEN="your-secret-token"`
+- 关闭鉴权：`export INDEXTTS_API_TOKEN=""`（仅建议内网/本机使用）
+- 注意：本仓库公开时默认 Key 也是公开的，生产环境请自定义 Key
+
+所有合成请求需在请求头携带：
 
 ```
 Authorization: Bearer <your-token>
