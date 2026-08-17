@@ -290,7 +290,13 @@ class TTSApp:
                         "format": "wav",
                         "lang": lang,
                     })
-                return FileResponse(out_path, media_type="audio/wav", filename="index_tts_2_5.wav")
+                # 读字节后用 Response 返回，避免 FileResponse 延迟读取时
+                # finally 块已 os.unlink 删掉临时 wav 文件（竞态导致 500）
+                from fastapi.responses import Response as RawResponse
+                with open(out_path, "rb") as f:
+                    audio_bytes = f.read()
+                return RawResponse(content=audio_bytes, media_type="audio/wav",
+                                   headers={"Content-Disposition": 'attachment; filename="index_tts_2_5.wav"'})
             except HTTPException:
                 raise
             except RuntimeError as e:
