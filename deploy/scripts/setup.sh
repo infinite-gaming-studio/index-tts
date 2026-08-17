@@ -43,14 +43,17 @@ pip install -U uv -q
 uv sync --all-extras
 
 echo "==> [3/3] 下载 IndexTTS-2.5 权重 (来源: ${MODEL_SOURCE})"
+# hf/modelscope CLI 会交互式询问"是否升级", 在 notebook 中无人应答导致卡死;
+# 禁用升级检查 + 关闭 stdin, 保证脚本全程非交互
+export HF_HUB_DISABLE_UPDATE_CHECK=1
 case "${MODEL_SOURCE}" in
   modelscope)
     uv tool install modelscope -q
-    modelscope download --model IndexTeam/IndexTTS-2.5 --local_dir checkpoints
+    modelscope download --model IndexTeam/IndexTTS-2.5 --local_dir checkpoints < /dev/null
     ;;
   huggingface)
     uv tool install huggingface-hub -q
-    hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+    hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints < /dev/null
     ;;
   *)
     echo "!! 未知 MODEL_SOURCE=${MODEL_SOURCE} (可选 huggingface|modelscope)" >&2
