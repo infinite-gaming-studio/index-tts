@@ -119,13 +119,32 @@ case "${TUNNEL}" in
     ./cloudflared tunnel --url "http://127.0.0.1:${PORT}"
     ;;
   ngrok)
-    pip install -q pyngrok
-    if [ -n "${NGROK_TOKEN:-}" ]; then
-      python -c "from pyngrok import ngrok; ngrok.set_auth_token('${NGROK_TOKEN}')"
+    # 官方 ngrok 二进制方式（比 pyngrok 更稳定，失败时有明确输出）
+    if [ ! -x ./ngrok ]; then
+      echo "    下载 ngrok 二进制..."
+      curl -sL -o /tmp/ngrok.zip \
+        "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip" || {
+        echo "!! ngrok 下载失败，请检查网络或改用 TUNNEL=cf" >&2
+        exit 1
+      }
+      (command -v unzip >/dev/null && unzip -o -q /tmp/ngrok.zip -d .) || {
+        echo "!! 解压 ngrok 失败，请检查 unzip" >&2
+        exit 1
+      }
+      chmod +x ./ngrok
     fi
-    python -c "from pyngrok import ngrok; print('Public URL:', ngrok.connect(${PORT}).public_url)"
-    echo "==> ngrok 隧道已建立 (Ctrl+C 退出)"
-    sleep infinity
+    if [ -n "${NGROK_TOKEN:-}" ]; then
+      echo "==> 配置 ngrok authtoken..."
+      ./ngrok config add-authtoken "${NGROK_TOKEN}" 2>&1 | tail -2
+    else
+      echo "!! 未设置 NGROK_TOKEN，免费版隧道可能受限" >&2
+    fi
+    echo "==> 启动 ngrok 隧道 (http://127.0.0.1:${PORT})..."
+    # 后台启动 ngrok，日志到 ngrok.log，方便 notebook 轮询提取 URL
+    nohup ./ngrok http "${PORT}" --log=stdout > ngrok.log 2>&1 &
+    NGROK_PID=$!
+    echo "==> ngrok 已启动 (PID ${NGROK_PID})，Public URL 见 ngrok.log"
+    tail -f ngrok.log
     ;;
   none)
     echo "==> 未启用隧道, 仅本机可访问: http://127.0.0.1:${PORT}"
