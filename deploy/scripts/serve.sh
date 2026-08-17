@@ -135,16 +135,15 @@ case "${TUNNEL}" in
     fi
     if [ -n "${NGROK_TOKEN:-}" ]; then
       echo "==> 配置 ngrok authtoken..."
-      ./ngrok config add-authtoken "${NGROK_TOKEN}" 2>&1 | tail -2
+      ./ngrok config add-authtoken "${NGROK_TOKEN}" 2>&1 | tail -3
     else
-      echo "!! 未设置 NGROK_TOKEN，免费版隧道可能受限" >&2
+      echo "!! 未设置 NGROK_TOKEN，免费版隧道必须配置 authtoken" >&2
     fi
     echo "==> 启动 ngrok 隧道 (http://127.0.0.1:${PORT})..."
-    # 后台启动 ngrok，日志到 ngrok.log，方便 notebook 轮询提取 URL
-    nohup ./ngrok http "${PORT}" --log=stdout > ngrok.log 2>&1 &
-    NGROK_PID=$!
-    echo "==> ngrok 已启动 (PID ${NGROK_PID})，Public URL 见 ngrok.log"
-    tail -f ngrok.log
+    # 必须 exec 前台运行：输出直接进 serve.sh 的 stdout（serve_console.log），
+    # notebook 轮询 serve_console.log 才能提取到 Public URL。
+    # 不能重定向到 ngrok.log——notebook 看不到那个文件，会报「获取不到公网 URL」。
+    exec ./ngrok http "${PORT}" --log=stdout
     ;;
   none)
     echo "==> 未启用隧道, 仅本机可访问: http://127.0.0.1:${PORT}"
