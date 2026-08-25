@@ -170,6 +170,8 @@ class TTSApp:
                 "device": str(t.device) if t else self.config.device,
                 "loaded": t is not None,
                 "bf16": bool(getattr(t, "use_bf16", False)) if t else self.config.use_bf16,
+                "fp16": bool(getattr(t, "use_fp16", False)) if t else False,
+                "cuda_kernel": bool(getattr(t, "use_cuda_kernel", False)) if t else False,
                 "low_vram": bool(getattr(t, "low_vram", False)) if t else False,
                 "qwen_emo": t is not None and getattr(t, "qwen_emo", None) is not None,
                 "languages": list(DEFAULT_LANGS),
@@ -192,10 +194,13 @@ class TTSApp:
             top_k: int = Form(30),
             temperature: float = Form(0.8),
             length_penalty: float = Form(0.0),
-            num_beams: int = Form(3),
+            num_beams: int = Form(1, description="beam 数 (do_sample=True 时恒为 1; 采样模式下用 beam 会显著变慢且矛盾)"),
             repetition_penalty: float = Form(10.0),
             max_mel_tokens: int = Form(1500),
             max_text_tokens_per_segment: int = Form(120),
+            diffusion_steps: int = Form(None, description="CFM 扩散步数 (默认 20; 15 更快, 25 更稳)"),
+            cfg_rate: float = Form(None, description="CFM classifier-free guidance 强度 (默认 0.7)"),
+            interval_silence: int = Form(200, description="长文本分段间的静音时长 (ms, 0-1000)"),
             response_format: str = Form("wav", description="wav | json (json 返回 base64)"),
             _auth: bool = Depends(self._verify_token),
         ):
@@ -249,6 +254,9 @@ class TTSApp:
                     emo_text = None  # 缺省时使用主文本
 
                 # 生成参数
+                # do_sample=True 时 num_beams 必须为 1 (beam+采样自相矛盾且极慢)
+                if bool(do_sample):
+                    num_beams = 1
                 generation_kwargs = {
                     "do_sample": bool(do_sample),
                     "top_p": float(top_p),
@@ -259,6 +267,13 @@ class TTSApp:
                     "repetition_penalty": float(repetition_penalty),
                     "max_mel_tokens": int(max_mel_tokens),
                 }
+                diffusion_steps_v = int(diffusion_steps) if diffusion_steps else None
+                if diffusion_steps_v is not None:
+                    diffusion_steps_v = max(5, min(50, diffusion_steps_v))
+                cfg_rate_v = float(cfg_rate) if cfg_rate else None
+                if cfg_rate_v is not None:
+                    cfg_rate_v = max(0.0, min(2.0, cfg_rate_v))
+                interval_silence_v = max(0, min(1000, int(interval_silence)))
 
                 # ---- 推理 (加锁, 保护内部缓存) ----
                 out_path = NamedTemporaryFile(delete=False, suffix=".wav").name
@@ -278,6 +293,9 @@ class TTSApp:
                         duration_factor=duration_factor,
                         verbose=False,
                         max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                        diffusion_steps=diffusion_steps_v,
+                        inference_cfg_rate=cfg_rate_v,
+                        interval_silence=interval_silence_v,
                         **generation_kwargs,
                     )
 

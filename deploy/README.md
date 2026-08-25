@@ -143,7 +143,7 @@ notebook 内部即调用 `deploy/scripts/setup.sh` 与 `serve.sh`，克隆地址
 
 ## 常见问题
 
-- **显存不足**：确认使用 `use_bf16=True`（2.5）/ `use_fp16=True`（2）；或
+- **显存不足**：确认使用 `use_bf16=True`（2.5）/ `use_fp16=True`（2）；T4/P100/V100 会自动回退 FP16 无需手动处理；或
   `WEBUI_ARGS="--fp16" bash deploy/scripts/serve.sh`。
 - **HF 下载慢/超时**：`export HF_ENDPOINT="https://hf-mirror.com"` 或
   `MODEL_SOURCE=modelscope`。

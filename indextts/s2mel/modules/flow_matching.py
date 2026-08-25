@@ -28,7 +28,7 @@ class BASECFM(torch.nn.Module, ABC):
             self.zero_prompt_speech_token = False
 
     @torch.inference_mode()
-    def inference(self, mu, x_lens, prompt, style, f0, n_timesteps, temperature=1.0, inference_cfg_rate=0.5):
+    def inference(self, mu, x_lens, prompt, style, f0, n_timesteps, temperature=1.0, inference_cfg_rate=0.5, quiet=False):
         """Forward diffusion
 
         Args:
@@ -43,6 +43,7 @@ class BASECFM(torch.nn.Module, ABC):
             f0: None
             n_timesteps (int): number of diffusion steps
             temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
+            quiet (bool): disable tqdm progress bar (server/notebook mode).
 
         Returns:
             sample: generated mel-spectrogram
@@ -52,9 +53,9 @@ class BASECFM(torch.nn.Module, ABC):
         z = torch.randn([B, self.in_channels, T], device=mu.device) * temperature
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device)
         # t_span = t_span + (-1) * (torch.cos(torch.pi / 2 * t_span) - 1 + t_span)
-        return self.solve_euler(z, x_lens, prompt, mu, style, f0, t_span, inference_cfg_rate)
+        return self.solve_euler(z, x_lens, prompt, mu, style, f0, t_span, inference_cfg_rate, quiet=quiet)
 
-    def solve_euler(self, x, x_lens, prompt, mu, style, f0, t_span, inference_cfg_rate=0.5):
+    def solve_euler(self, x, x_lens, prompt, mu, style, f0, t_span, inference_cfg_rate=0.5, quiet=False):
         """
         Fixed euler solver for ODEs.
         Args:
@@ -82,7 +83,7 @@ class BASECFM(torch.nn.Module, ABC):
         x[..., :prompt_len] = 0
         if self.zero_prompt_speech_token:
             mu[..., :prompt_len] = 0
-        for step in tqdm(range(1, len(t_span))):
+        for step in (range(1, len(t_span)) if quiet else tqdm(range(1, len(t_span)))):
             dt = t_span[step] - t_span[step - 1]
             if inference_cfg_rate > 0:
                 # Stack original and CFG (null) inputs for batched processing

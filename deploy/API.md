@@ -42,7 +42,7 @@ uv run --all-extras python deploy/service.py --mode api
 | `--no-bf16` | flag | - | 禁用 BF16（2.5 默认开启半精度） |
 | `--device` | str | 自动 | `cuda:0` / `cpu` 等 |
 | `--deepspeed` | flag | - | 启用 DeepSpeed 加速 |
-| `--cuda-kernel` | flag | - | 启用 BigVGAN CUDA kernel |
+| `--cuda-kernel` | flag | 自动 | 启用 BigVGAN CUDA kernel（T4/P100 等默认自动启用，无需手动传） |
 | `--accel` | flag | - | 启用 GPT2 加速引擎 |
 | `--torch-compile` | flag | - | 启用 torch.compile |
 | `--qwen-emo` | flag | - | 加载 QwenEmotion（emo_mode=3 需要） |
@@ -101,10 +101,13 @@ Authorization: Bearer <your-token>
 | `top_k` | int | 否 | 30 | Top-k 采样参数 |
 | `temperature` | float | 否 | 0.8 | 温度参数 |
 | `length_penalty` | float | 否 | 0.0 | 长度惩罚 |
-| `num_beams` | int | 否 | 3 | Beam search 宽度 |
+| `num_beams` | int | 否 | 1 | Beam search 宽度（`do_sample=true` 时恒为 1） |
 | `repetition_penalty` | float | 否 | 10.0 | 重复惩罚 |
 | `max_mel_tokens` | int | 否 | 1500 | 最大生成 token 数 |
 | `max_text_tokens_per_segment` | int | 否 | 120 | 分句最大 token 数 |
+| `diffusion_steps` | int | 否 | 20 | CFM 扩散步数：15=更快 20=默认 25=更稳（速度/质量权衡） |
+| `cfg_rate` | float | 否 | 0.7 | CFM classifier-free guidance 强度（0.5-0.9） |
+| `interval_silence` | int | 否 | 200 | 长文本分段间的静音时长（ms，0-1000） |
 | `response_format` | string | 否 | wav | `wav` 返回音频文件 / `json` 返回 base64 |
 
 #### 情感控制模式 (emo_mode)
@@ -219,6 +222,24 @@ curl -X POST "http://localhost:8000/api/tts" \
   -F "lang=EN" \
   -F "duration_factor=1.2" \
   --output output.wav
+```
+
+**速度/质量权衡（Colab/Kaggle T4 常用）**:
+```bash
+# 更快 (diffusion_steps=15, 段间静音 150ms)
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=这是一段较长的测试文本，用于验证分段合成。" \
+  -F "spk_audio=@reference.wav" \
+  -F "diffusion_steps=15" \
+  -F "interval_silence=150" \
+  --output output_fast.wav
+
+# 更稳 (diffusion_steps=25)
+curl -X POST "http://localhost:8000/api/tts" \
+  -F "text=这是一段较长的测试文本，用于验证分段合成。" \
+  -F "spk_audio=@reference.wav" \
+  -F "diffusion_steps=25" \
+  --output output_stable.wav
 ```
 
 **Python (requests - 情感向量 + JSON 响应)**:

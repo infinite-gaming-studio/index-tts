@@ -1,0 +1,30 @@
+# 技术术语词汇表 — 确保专业术语被正确发音
+# 格式:
+#   原始术语: {"en": "英文读法", "zh": "中文读法"}
+#   原始术语: "中英文相同读法"  (简写形式)
+# 大小写不敏感, 自动匹配词边界 (不会误匹配术语的子串)
+---
+API: {"en": "A P I", "zh": "A P I"}
+AI: {"en": "A I", "zh": "A I"}
+App: {"en": "app", "zh": "APP"}
+TTS: {"en": "T T S", "zh": "T T S"}
+CPU: {"en": "C P U", "zh": "C P U"}
+GPU: {"en": "G P U", "zh": "G P U"}
+USB: {"en": "U S B", "zh": "U S B"}
+PDF: {"en": "P D F", "zh": "P D F"}
+JSON: {"en": "jay son", "zh": "JAY SON"}
+WiFi: {"en": "why fi", "zh": "WIFI"}
+Wi-Fi: {"en": "why fi", "zh": "WIFI"}
+5G: {"en": "five G", "zh": "五 G"}
+4G: {"en": "four G", "zh": "四 G"}
+C++: {"en": "C plus plus", "zh": "C 加加"}
+C#: "C sharp"
+M.2: {"en": "M dot two", "zh": "M 二"}
+NVMe: {"en": "N V M E", "zh": "N V M E"}
+SSD: {"en": "S S D", "zh": "S S D"}
+HTTP: {"en": "H T T P", "zh": "H T T P"}
+HTTPS: {"en": "H T T P S", "zh": "H T T P S"}
+URL: {"en": "U R L", "zh": "U R L"}
+IP: {"en": "I P", "zh": "I P"}
+MAC: {"en": "M A C", "zh": "M A C"}
+HDMI: {"en": "H D M I", "zh": "H D M I"}

@@ -268,7 +268,7 @@ def _build_preset_data(
             "top_k": int(top_k) if top_k is not None else 30,
             "temperature": float(temperature) if temperature is not None else 0.8,
             "length_penalty": float(length_penalty) if length_penalty is not None else 0.0,
-            "num_beams": int(num_beams) if num_beams is not None else 3,
+            "num_beams": int(num_beams) if num_beams is not None else 1,
             "repetition_penalty": float(repetition_penalty) if repetition_penalty is not None else 10.0,
             "max_mel_tokens": int(max_mel_tokens) if max_mel_tokens is not None else 1500,
             "max_text_tokens_per_segment": int(max_text_tokens_per_segment)
@@ -396,7 +396,7 @@ def on_preset_load(name):
             top_k: gr.update(value=advanced.get("top_k", 30)),
             temperature: gr.update(value=advanced.get("temperature", 0.8)),
             length_penalty: gr.update(value=advanced.get("length_penalty", 0.0)),
-            num_beams: gr.update(value=advanced.get("num_beams", 3)),
+            num_beams: gr.update(value=advanced.get("num_beams", 1)),
             repetition_penalty: gr.update(value=advanced.get("repetition_penalty", 10.0)),
             max_mel_tokens: gr.update(value=advanced.get("max_mel_tokens", 1500)),
             max_text_tokens_per_segment: gr.update(
@@ -642,6 +642,9 @@ def gen_single(emo_control_method,prompt, text,
     do_sample, top_p, top_k, temperature, \
         length_penalty, num_beams, repetition_penalty, max_mel_tokens = args
 
+    # do_sample=True 时 num_beams 必须为 1 (beam+采样自相矛盾且慢 3 倍)
+    if bool(do_sample):
+        num_beams = 1
     kwargs = {
         "do_sample": bool(do_sample),
         "top_p": float(top_p),
@@ -903,7 +906,7 @@ with gr.Blocks(
                     with gr.Row():
                         top_p = gr.Slider(label="top_p", minimum=0.0, maximum=1.0, value=0.8, step=0.01)
                         top_k = gr.Slider(label="top_k", minimum=0, maximum=100, value=30, step=1)
-                        num_beams = gr.Slider(label="num_beams", value=3, minimum=1, maximum=10, step=1)
+                        num_beams = gr.Slider(label="num_beams", value=1, minimum=1, maximum=10, step=1, info=i18n("do_sample=True 时建议保持 1 (beam+采样矛盾且慢 3 倍); 关掉 do_sample 后再调大"))
                     with gr.Row():
                         repetition_penalty = gr.Number(label="repetition_penalty", precision=None, value=10.0, minimum=0.1, maximum=20.0, step=0.1)
                         length_penalty = gr.Number(label="length_penalty", precision=None, value=0.0, minimum=-2.0, maximum=2.0, step=0.1)

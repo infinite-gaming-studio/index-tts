@@ -328,7 +328,9 @@ class TextNormalizer:
         sorted_terms = sorted(self.term_glossary.keys(), key=len, reverse=True)
         @lru_cache(maxsize=42)
         def get_term_pattern(term: str):
-            return re.compile(re.escape(term), re.IGNORECASE)
+            # (?<!\w)...(?!\w) 词边界: 防止 "API" 误匹配 "capital"、"App" 误匹配 "apple";
+            # 相比 \b, 对以非单词字符结尾的术语(如 C++, M.2)也能正确匹配。
+            return re.compile(r'(?<!\w)' + re.escape(term) + r'(?!\w)', re.IGNORECASE)
         transformed_text = text
         for term in sorted_terms:
             term_value = self.term_glossary[term]
@@ -519,22 +521,24 @@ class TextTokenizer:
     def tokenize(self, text: str) -> List[str]:
         return self.encode(text, out_type=str)
 
-    def encode(self, text: str, **kwargs):
+    def encode(self, text: str, normalize: bool = True, **kwargs):
         if len(text) == 0:
             return []
         if len(text.strip()) == 1:
             return self.sp_model.Encode(text, out_type=kwargs.pop("out_type", int), **kwargs)
         # 预处理
-        if self.normalizer:
+        # NOTE: 调用方可能已经做过文本归一化(如 infer_v2_5.infer_generator),
+        # 此时必须传 normalize=False 避免二次归一化破坏发音标注/拼音/术语。
+        if self.normalizer and normalize:
             text = self.normalizer.normalize(text)
         if len(self.pre_tokenizers) > 0:
             for pre_tokenizer in self.pre_tokenizers:
                 text = pre_tokenizer(text)
         return self.sp_model.Encode(text, out_type=kwargs.pop("out_type", int), **kwargs)
 
-    def batch_encode(self, texts: List[str], **kwargs):
+    def batch_encode(self, texts: List[str], normalize: bool = True, **kwargs):
         # 预处理
-        if self.normalizer:
+        if self.normalizer and normalize:
             texts = [self.normalizer.normalize(text) for text in texts]
         if len(self.pre_tokenizers) > 0:
             for pre_tokenizer in self.pre_tokenizers:

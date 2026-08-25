@@ -94,7 +94,8 @@ class IndexTTS2:
         if device is not None:
             self.device = device
             self.use_bf16 = False if device == "cpu" else use_bf16
-            self.use_cuda_kernel = use_cuda_kernel is not None and use_cuda_kernel and device.startswith("cuda")
+            # use_cuda_kernel=None → 自动启用 (CUDA 设备); 显式传 False 才关闭
+            self.use_cuda_kernel = use_cuda_kernel if use_cuda_kernel is not None else device.startswith("cuda")
         elif torch.cuda.is_available():
             self.device = "cuda:0"
             self.use_bf16 = use_bf16
@@ -115,7 +116,19 @@ class IndexTTS2:
 
         self.cfg = OmegaConf.load(cfg_path)
         self.model_dir = model_dir
-        self.dtype = torch.bfloat16 if self.use_bf16 else None
+
+        # ---- 精度自适应: T4/P100/V100 (sm<8.0) 无原生 BF16, 自动回退 FP16 ----
+        # BF16 在旧架构上只能软件模拟(极慢), 是 Colab/Kaggle 免费卡上
+        # "慢" 的第一大根因; FP16 在这些卡上快 2-3 倍, 且 v1 已验证可用。
+        self.use_fp16 = False
+        if self.use_bf16 and self.device.startswith("cuda"):
+            dev_idx = int(self.device.split(":")[-1]) if ":" in self.device else 0
+            cap = torch.cuda.get_device_capability(dev_idx)
+            if cap[0] < 8:
+                self.use_bf16 = False
+                self.use_fp16 = True
+                print(f">> GPU sm_{cap[0]}{cap[1]} 无原生 BF16, 已自动切换 FP16 (更快)")
+        self.dtype = torch.bfloat16 if self.use_bf16 else (torch.float16 if self.use_fp16 else None)
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
         self.use_accel = use_accel
         self.use_torch_compile = use_torch_compile
@@ -139,10 +152,9 @@ class IndexTTS2:
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
         load_checkpoint(self.gpt, self.gpt_path)
         self.gpt = self.gpt.to(self.device)
-        if self.use_bf16:
-            self.gpt.eval().bfloat16()
-        else:
-            self.gpt.eval()
+        self.gpt.eval()
+        if self.dtype is not None:
+            self.gpt = self.gpt.to(self.dtype)
         print(">> GPT weights restored from:", self.gpt_path)
 
         if use_deepspeed:
@@ -152,7 +164,7 @@ class IndexTTS2:
                 use_deepspeed = False
                 print(f">> Failed to load DeepSpeed. Falling back to normal inference. Error: {e}")
 
-        self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=self.use_bf16)
+        self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=self.dtype in (torch.bfloat16, torch.float16))
 
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN
@@ -410,7 +422,9 @@ class IndexTTS2:
     SPLIT_PROTECTED_PATTERN = re.compile(r'<\|SPECIAL_TOKEN_\d+\|>.*?<\|SPECIAL_TOKEN_\d+\|>')
 
     def _token_len(self, text):
-        return len(self.tokenizer.encode(text, allowed_special='all'))
+        # normalize=False: 文本在 infer_generator 中已归一化, 二次归一化会破坏
+        # 发音标注 <|SPECIAL_TOKEN_1|> / 拼音 / 技术术语, 导致错误发音。
+        return len(self.tokenizer.encode(text, allowed_special='all', normalize=False))
 
     def _split_atomic_pieces(self, text):
         pieces, pos = [], 0
@@ -505,7 +519,8 @@ class IndexTTS2:
     def infer(self, spk_audio_prompt, text, output_path, lang,
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None, use_emo_text=False, emo_text=None, use_random=False, interval_silence=200,
-              verbose=False, max_text_tokens_per_segment=120, stream_return=False, more_segment_before=0, duration_factor=1.0, text_normalization=True, **generation_kwargs):
+              verbose=False, max_text_tokens_per_segment=120, stream_return=False, more_segment_before=0, duration_factor=1.0, text_normalization=True,
+              diffusion_steps=None, inference_cfg_rate=None, **generation_kwargs):
         if self.low_vram and not stream_return and len(text) > 40:
             segments = self.split_text_by_punctuation(text, max_chars=40)
             if verbose:
@@ -517,7 +532,8 @@ class IndexTTS2:
                     spk_audio_prompt, seg_text, None, lang,
                     emo_audio_prompt, emo_alpha, emo_vector,
                     use_emo_text, emo_text, use_random, 0,
-                    verbose, max_text_tokens_per_segment, False, 0, duration_factor=duration_factor, text_normalization=text_normalization, **generation_kwargs
+                    verbose, max_text_tokens_per_segment, False, 0, duration_factor=duration_factor, text_normalization=text_normalization,
+                    diffusion_steps=diffusion_steps, inference_cfg_rate=inference_cfg_rate, **generation_kwargs
                 )
                 result = None
                 for result in gen:
@@ -551,7 +567,8 @@ class IndexTTS2:
                 emo_audio_prompt, emo_alpha,
                 emo_vector,
                 use_emo_text, emo_text, use_random, interval_silence,
-                verbose, max_text_tokens_per_segment, stream_return, more_segment_before, duration_factor=duration_factor, text_normalization=text_normalization, **generation_kwargs
+                verbose, max_text_tokens_per_segment, stream_return, more_segment_before, duration_factor=duration_factor, text_normalization=text_normalization,
+                diffusion_steps=diffusion_steps, inference_cfg_rate=inference_cfg_rate, **generation_kwargs
             )
         else:
             try:
@@ -560,7 +577,8 @@ class IndexTTS2:
                     emo_audio_prompt, emo_alpha,
                     emo_vector,
                     use_emo_text, emo_text, use_random, interval_silence,
-                    verbose, max_text_tokens_per_segment, stream_return, more_segment_before, duration_factor=duration_factor, text_normalization=text_normalization, **generation_kwargs
+                    verbose, max_text_tokens_per_segment, stream_return, more_segment_before, duration_factor=duration_factor, text_normalization=text_normalization,
+                    diffusion_steps=diffusion_steps, inference_cfg_rate=inference_cfg_rate, **generation_kwargs
                 ))[0]
             except IndexError:
                 return None
@@ -569,8 +587,10 @@ class IndexTTS2:
     def infer_generator(self, spk_audio_prompt, text, output_path, lang,
               emo_audio_prompt=None, emo_alpha=1.0, emo_vector=None,
               use_emo_text=False, emo_text=None, use_random=False, interval_silence=200,
-              verbose=False, max_text_tokens_per_segment=120, stream_return=False, quick_streaming_tokens=0, duration_factor=1.0, text_normalization=True, **generation_kwargs):
-        print(">> starting inference...")
+              verbose=False, max_text_tokens_per_segment=120, stream_return=False, quick_streaming_tokens=0, duration_factor=1.0, text_normalization=True,
+              diffusion_steps=None, inference_cfg_rate=None, **generation_kwargs):
+        if verbose:
+            print(">> starting inference...")
         self._set_gr_progress(0, "starting inference...")
         if verbose:
             print(f"origin text:{text}, spk_audio_prompt:{spk_audio_prompt}, "
@@ -720,7 +740,8 @@ class IndexTTS2:
         segments_count = len(segments)
         segment_tokens = []
         for seg_text in segments:
-            toks = self.tokenizer.encode(lang_prefix + seg_text, allowed_special='all')
+            # normalize=False: 文本已归一化, 避免二次归一化破坏发音标注/拼音/术语
+            toks = self.tokenizer.encode(lang_prefix + seg_text, allowed_special='all', normalize=False)
             toks = torch.IntTensor(toks).unsqueeze(0).to(self.device)
             segment_tokens.append(F.pad(toks, (0, 1), value=1))
         lang = torch.LongTensor([lang_to_token(lang)]).to(self.device)
@@ -816,18 +837,22 @@ class IndexTTS2:
                     code_lens.append(code_len)
                     max_code_len = max(max_code_len, code_len)
                 codes = codes[:, :max_code_len]
-                code_lens = torch.LongTensor(code_lens)
-                code_lens = code_lens.to(self.device)
+                # 压缩模型生成的长静音段 (silent_token 连续 >30 个 → 截到 ≤10):
+                # 消除“不合时宜的长停顿”, v1 同款处理, v2.5 此前漏调。
+                codes, code_lens = self.remove_long_silence(codes, silent_token=52, max_consecutive=30)
                 if verbose:
                     print(codes, type(codes))
                     print(f"fix codes shape: {codes.shape}, codes type: {codes.dtype}")
                     print(f"code len: {code_lens}")
 
-                dtype = None
-                with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
+                # 修复: s2mel/BigVGAN 段此前恒为 fp32 (dtype 被硬编码为 None),
+                # 是推理慢的第二大根因; 改用与 GPT 相同的半精度 autocast。
+                with torch.amp.autocast(text_tokens.device.type, enabled=self.dtype is not None, dtype=self.dtype):
                     m_start_time = time.perf_counter()
-                    diffusion_steps = 25
-                    inference_cfg_rate = 0.7
+                    if diffusion_steps is None:
+                        diffusion_steps = 20  # 默认 20 步 (原 25 步, 提速 ~20%, 质量几乎无损)
+                    if inference_cfg_rate is None:
+                        inference_cfg_rate = 0.7
                     S_infer = self.semantic_codec.decode(codes)
                     target_lengths = torch.LongTensor([int(S_infer.shape[1] * 1.72 * duration_factor)]).to(codes.device)
 
@@ -841,13 +866,13 @@ class IndexTTS2:
                                                                    torch.LongTensor([cat_condition.size(1)]).to(
                                                                        cond.device),
                                                                    ref_mel, style, None, diffusion_steps,
-                                                                   inference_cfg_rate=inference_cfg_rate)
+                                                                   inference_cfg_rate=inference_cfg_rate,
+                                                                   quiet=True)
                     vc_target = vc_target[:, :, ref_mel.size(-1):]
                     s2mel_time += time.perf_counter() - m_start_time
 
                     m_start_time = time.perf_counter()
                     wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
-                    print(wav.shape)
                     bigvgan_time += time.perf_counter() - m_start_time
                     wav = wav.squeeze(1)
 
@@ -862,6 +887,10 @@ class IndexTTS2:
                         silence = self.interval_silence(wavs, sampling_rate=sampling_rate, interval_silence=interval_silence)
                     yield silence
         end_time = time.perf_counter()
+
+        # 释放碎片化显存, 防止长时间运行 (服务模式) 累计 OOM
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         self._set_gr_progress(0.9, "saving audio...")
         wavs = self.insert_interval_silence(wavs, sampling_rate=sampling_rate, interval_silence=interval_silence)
